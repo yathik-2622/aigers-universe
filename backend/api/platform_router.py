@@ -94,3 +94,65 @@ async def list_available_tools():
     """List all MCP tool names available on the platform."""
     from mcp_tools.tool_server import TOOL_REGISTRY
     return {"tools": list(TOOL_REGISTRY.keys())}
+
+
+
+@router.post("/agents/dedupe", status_code=200)
+async def dedupe_agents():
+    """
+    One-shot maintenance: collapse duplicate agents into a single canonical row.
+
+    Steps:
+      1. Backfill `template_id` on legacy agents by matching `name` to marketplace_templates.
+      2. Group active agents by (template_id, name).
+      3. Keep the OLDEST agent in each group active; deactivate the rest.
+
+    Custom variants installed with `custom_name` retain a unique (template_id, name)
+    pair and are never collapsed with the default install.
+    """
+    from db.mongo_client import get_db
+    db = get_db()
+
+    # 1) Backfill template_id on legacy rows
+    templates = await db.marketplace_templates.find({}, {"_id": 0, "template_id": 1, "name": 1}).to_list(100)
+    name_to_template = {t["name"]: t["template_id"] for t in templates}
+
+    backfilled = 0
+    async for agent in db.agents.find({"template_id": {"$exists": False}, "status": "active"}, {"_id": 0}):
+        tpl_id = name_to_template.get(agent["name"])
+        if tpl_id:
+            await db.agents.update_one({"agent_id": agent["agent_id"]}, {"$set": {"template_id": tpl_id}})
+            backfilled += 1
+
+    # 2) Group + dedupe
+    active = await db.agents.find({"status": "active"}, {"_id": 0}).sort("created_at", 1).to_list(2000)
+    groups: dict[tuple, list[str]] = {}
+    for a in active:
+        key = (a.get("template_id") or f"__custom__::{a['name']}", a["name"], a.get("framework", "langgraph"))
+        groups.setdefault(key, []).append(a["agent_id"])
+
+    deactivated_ids: list[str] = []
+    kept_ids: list[str] = []
+    for ids in groups.values():
+        kept_ids.append(ids[0])  # oldest wins
+        deactivated_ids.extend(ids[1:])
+
+    if deactivated_ids:
+        await db.agents.update_many(
+            {"agent_id": {"$in": deactivated_ids}},
+            {"$set": {"status": "inactive", "deactivated_reason": "duplicate_cleanup"}},
+        )
+
+    logger.info(
+        "api.agents.dedupe.complete",
+        backfilled=backfilled,
+        groups=len(groups),
+        deactivated=len(deactivated_ids),
+        kept=len(kept_ids),
+    )
+    return {
+        "backfilled_template_ids": backfilled,
+        "groups_found": len(groups),
+        "agents_kept": len(kept_ids),
+        "agents_deactivated": len(deactivated_ids),
+    }

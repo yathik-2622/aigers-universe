@@ -148,3 +148,50 @@ async def run_seed() -> None:
             upsert=True,
         )
     logger.info("seed.rules.upserted", count=len(GOVERNANCE_RULES))
+
+    await _dedupe_active_agents(db)
+
+
+async def _dedupe_active_agents(db) -> None:
+    """
+    Startup hygiene: backfill template_id on legacy agents and collapse
+    duplicate active rows (same template_id + name + framework) into a
+    single oldest-wins canonical agent.
+
+    Custom variants installed with `custom_name` keep a unique pair and are
+    never collapsed.
+    """
+    # Backfill template_id by exact-name match on marketplace_templates
+    templates = await db.marketplace_templates.find({}, {"_id": 0, "template_id": 1, "name": 1}).to_list(100)
+    name_to_template = {t["name"]: t["template_id"] for t in templates}
+
+    backfilled = 0
+    async for agent in db.agents.find({"template_id": {"$exists": False}, "status": "active"}, {"_id": 0}):
+        tpl_id = name_to_template.get(agent["name"])
+        if tpl_id:
+            await db.agents.update_one({"agent_id": agent["agent_id"]}, {"$set": {"template_id": tpl_id}})
+            backfilled += 1
+
+    # Group and dedupe (oldest wins)
+    active = await db.agents.find({"status": "active"}, {"_id": 0}).sort("created_at", 1).to_list(2000)
+    groups: dict[tuple, list[str]] = {}
+    for a in active:
+        key = (a.get("template_id") or f"__custom__::{a['name']}", a["name"], a.get("framework", "langgraph"))
+        groups.setdefault(key, []).append(a["agent_id"])
+
+    deactivated_ids: list[str] = []
+    for ids in groups.values():
+        deactivated_ids.extend(ids[1:])
+
+    if deactivated_ids:
+        await db.agents.update_many(
+            {"agent_id": {"$in": deactivated_ids}},
+            {"$set": {"status": "inactive", "deactivated_reason": "duplicate_cleanup"}},
+        )
+
+    logger.info(
+        "seed.agents.dedupe",
+        backfilled_template_ids=backfilled,
+        groups=len(groups),
+        deactivated=len(deactivated_ids),
+    )
