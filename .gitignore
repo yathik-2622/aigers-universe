@@ -2,12 +2,15 @@
 .env
 .env.*
 *.env
-!.env.example
-!*.env.example
 credentials.json
 *.pem
 *.key
 .credentials
+
+# But always KEEP the example/sample env files
+!.env.example
+!*.env.example
+!*.env.sample
 
 # Python
 __pycache__/
@@ -65,30 +68,3 @@ test-results/
 
 # Emergent internals
 .emergent/
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
