@@ -1,0 +1,38 @@
+"""
+Observability API router.
+"""
+import structlog
+from fastapi import APIRouter, HTTPException, Query
+
+from db.mongo_client import get_db
+from observability.tracer import get_aggregate_metrics
+
+logger = structlog.get_logger(__name__)
+router = APIRouter()
+
+
+@router.get("/metrics")
+async def get_metrics():
+    return await get_aggregate_metrics()
+
+
+@router.get("/traces")
+async def get_traces(
+    workflow_run_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    db = get_db()
+    query: dict = {}
+    if workflow_run_id:
+        query["workflow_run_id"] = workflow_run_id
+    traces = await db.agent_traces.find(query, {"_id": 0, "full_output": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+    return {"traces": traces, "count": len(traces)}
+
+
+@router.get("/traces/{workflow_run_id}/full")
+async def get_full_trace(workflow_run_id: str):
+    db = get_db()
+    traces = await db.agent_traces.find({"workflow_run_id": workflow_run_id}, {"_id": 0}).sort("step_number", 1).to_list(100)
+    if not traces:
+        raise HTTPException(status_code=404, detail=f"No traces for run '{workflow_run_id}'")
+    return {"workflow_run_id": workflow_run_id, "traces": traces}

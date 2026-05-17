@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+  background: #0a0a0f;
+  color: #e9e9f7;
+}
+
+body {
+  font-family: 'Geist', 'Manrope', system-ui, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #7c5cff;
+  color: white;
+}
+
+/* Subtle grid background */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(124, 92, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 92, 255, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.bg-noise::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1, 0 0 0 0 1, 0 0 0 0 1, 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.6;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #11111a; }
+::-webkit-scrollbar-thumb { background: #2a2a44; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a5a; }
+
+/* ReactFlow theme overrides */
+.react-flow__node {
+  font-family: 'Geist', sans-serif !important;
+}
+.react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid #11111a !important;
+  background: #7c5cff !important;
+}
+.react-flow__edge-path {
+  stroke: #5b5b87 !important;
+  stroke-width: 2 !important;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: #7c5cff !important;
+  stroke-dasharray: 6;
+  animation: dash 0.6s linear infinite;
+}
+@keyframes dash {
+  to { stroke-dashoffset: -12; }
+}
+.react-flow__controls {
+  background: #11111a !important;
+  border: 1px solid #1f1f33 !important;
+  border-radius: 8px !important;
+}
+.react-flow__controls button {
+  background: #11111a !important;
+  border-bottom: 1px solid #1f1f33 !important;
+  color: #e9e9f7 !important;
+}
+.react-flow__minimap {
+  background: #11111a !important;
+  border: 1px solid #1f1f33 !important;
+  border-radius: 8px !important;
+}
+.react-flow__background {
+  background-color: #0a0a0f !important;
+}
+
+/* Card hover */
+.card-hover { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.card-hover:hover { transform: translateY(-1px); border-color: rgba(124, 92, 255, 0.5); }
+
+/* Pulse status */
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0.7); }
+  50%      { box-shadow: 0 0 0 10px rgba(124, 92, 255, 0); }
+}
+.glow-pulse { animation: glowPulse 1.8s ease-in-out infinite; }
+
+/* Fade-in stagger */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.fade-up { animation: fadeUp 0.45s ease forwards; }
+
+/* Status colors */
+.s-running { color: #7c5cff; }
+.s-completed, .s-success { color: #22c55e; }
+.s-paused { color: #f59e0b; }
+.s-failed { color: #ef4444; }
+.s-pending { color: #7c7c95; }
