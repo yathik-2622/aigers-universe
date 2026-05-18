@@ -3,7 +3,59 @@
 > Enterprise AI Engineering & Agentic Orchestration Platform.
 > Bring any agent. Orchestrate every workflow. Watch every token.
 
-A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewAI / LangChain / Agno), composing them into multi-agent workflows on a visual ReactFlow canvas, connecting them via **MCP** + **A2A**, gating them via **HITL**, and observing everything in real time.
+# 🚀 Core Stack
+
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18-20232A?logo=react&logoColor=61DAFB)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-Frontend-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Database-13AA52?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![FAISS](https://img.shields.io/badge/FAISS-Vector%20Search-0467DF)](https://github.com/facebookresearch/faiss)
+
+# 🤖 AI & Agent Frameworks
+
+[![LangChain](https://img.shields.io/badge/LangChain-Agent_Framework-121212)](https://www.langchain.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Workflow_Engine-FF6B35)](https://www.langchain.com/langgraph)
+[![CrewAI](https://img.shields.io/badge/CrewAI-Multi_Agent-6E56CF)](https://www.crewai.com/)
+[![Agno](https://img.shields.io/badge/Agno-Agent_Runtime-111827)](https://github.com/agno-agi/agno)
+[![OpenAI](https://img.shields.io/badge/OpenAI-Gateway-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
+
+# 🔗 Protocols & Orchestration
+
+[![MCP](https://img.shields.io/badge/MCP-Model_Context_Protocol-black)](https://modelcontextprotocol.io/)
+[![FastMCP](https://img.shields.io/badge/FastMCP-MCP_Server-1E293B)](https://github.com/jlowin/fastmcp)
+[![A2A](https://img.shields.io/badge/A2A-Agent_to_Agent-2563EB)](https://github.com/google/A2A)
+[![Agentic AI](https://img.shields.io/badge/Agentic_AI-Orchestration-7C3AED)](#)
+[![Multi Agent](https://img.shields.io/badge/Multi_Agent-Workflows-DC2626)](#)
+
+# 🎨 Frontend & Visualization
+
+[![ReactFlow](https://img.shields.io/badge/ReactFlow-Workflow_Canvas-FF0072)](https://reactflow.dev/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-Styling-0F172A?logo=tailwindcss)](https://tailwindcss.com/)
+[![Recharts](https://img.shields.io/badge/Recharts-Observability-FF6384)](https://recharts.org/)
+[![React Router](https://img.shields.io/badge/React_Router-Navigation-CA4245?logo=react-router&logoColor=white)](https://reactrouter.com/)
+
+# 🧠 Knowledge Base & Retrieval
+
+[![Embeddings](https://img.shields.io/badge/OpenAI-Embeddings-10A37F?logo=openai&logoColor=white)](https://platform.openai.com/)
+[![PyMuPDF](https://img.shields.io/badge/PyMuPDF-PDF_Parsing-E11D48)](https://pymupdf.readthedocs.io/)
+[![python-docx](https://img.shields.io/badge/python--docx-DOCX_Parser-0F172A)](https://python-docx.readthedocs.io/)
+
+# 🏢 Enterprise Features
+
+[![HITL](https://img.shields.io/badge/HITL-Human_in_the_Loop-F97316)](#)
+[![Observability](https://img.shields.io/badge/Observability-Agent_Tracing-14B8A6)](#)
+[![Workflow Engine](https://img.shields.io/badge/Workflow_Engine-LangGraph-9333EA)](#)
+[![AI Governance](https://img.shields.io/badge/AI_Governance-Policies-DC2626)](#)
+[![Modernization](https://img.shields.io/badge/Application_Modernization-Enterprise-0EA5E9)](#)
+
+# 📜 License
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+
+
+A generic, domain-agnostic and framework-agnostic platform for registering AI agents (LangGraph / CrewAI / LangChain / Agno), composing them into multi-agent workflows on a visual ReactFlow canvas, connecting them via **MCP** + **A2A**, gating them via **HITL**, and observing everything in real time.
 
 ## What's New
 
