@@ -1,29 +1,23 @@
 """
-Agent registry / runtime — invokes a registered agent with input data.
+Agent registry / runtime facade.
 
-Each agent has:
-  - system_prompt: LLM instructions
-  - tools: list of MCP tool names the agent may call
-  - hitl_enabled: pause workflow after this agent runs for human review
+The raw hand-rolled OpenAI tool loop has been replaced with framework-native runners:
+  - LangGraph via `create_react_agent`
+  - LangChain via `create_agent`
+  - CrewAI via `Crew` / `Task` / `Agent`
+  - Agno via `Agent` / `OpenAIChat` when installed
 
-Strategy:
-  1. Build messages: system_prompt + serialised input_data + (optional) prior A2A messages.
-  2. Call the LLM with the agent's tool schemas advertised.
-  3. If the LLM returns tool calls, invoke them via TOOL_REGISTRY and feed results back.
-  4. Loop until the LLM produces a final assistant message or max iterations reached.
-  5. Return the agent's structured output plus token/latency/tools_called metadata.
+This module keeps the shared tool schemas for UI/tool-chat usage and forwards
+workflow execution into the framework runner layer.
 """
-import json
-import time
+
 import structlog
 
-from core.llm_router import chat_completion
-from mcp_tools.tool_server import TOOL_REGISTRY
+from core.framework_runners import run_framework_agent
 
 logger = structlog.get_logger(__name__)
 
 
-# OpenAI tool schemas — agents advertise which of these they can use
 TOOL_SCHEMAS: dict[str, dict] = {
     "semantic_search": {
         "type": "function",
@@ -34,6 +28,21 @@ TOOL_SCHEMAS: dict[str, dict] = {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Natural language query"},
+                    "top_k": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "knowledge_base_search": {
+        "type": "function",
+        "function": {
+            "name": "knowledge_base_search",
+            "description": "Search uploaded workspace documents as a reusable knowledge base.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
                     "top_k": {"type": "integer", "default": 5},
                 },
                 "required": ["query"],
@@ -89,6 +98,208 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "wikipedia_search": {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_search",
+            "description": "Search Wikipedia for background context and reference links.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "webpage_fetch": {
+        "type": "function",
+        "function": {
+            "name": "webpage_fetch",
+            "description": "Fetch a web page and return cleaned text content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "max_chars": {"type": "integer", "default": 5000},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    "weather_current": {
+        "type": "function",
+        "function": {
+            "name": "weather_current",
+            "description": "Fetch current weather from Open-Meteo using latitude and longitude.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                    "timezone": {"type": "string", "default": "auto"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+        },
+    },
+    "openweather_current": {
+        "type": "function",
+        "function": {
+            "name": "openweather_current",
+            "description": "Fetch current weather from OpenWeather using configured API key.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                    "units": {"type": "string", "default": "metric"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+        },
+    },
+    "serpapi_search": {
+        "type": "function",
+        "function": {
+            "name": "serpapi_search",
+            "description": "Fetch live search engine results through SerpAPI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "num": {"type": "integer", "default": 5},
+                    "location": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "official_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "official_docs_search",
+            "description": "Search official docs providers such as Oracle Java, Python, Spring, and .NET.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "enum": ["java", "python", "spring", "dotnet"]},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["provider", "query"],
+            },
+        },
+    },
+    "java_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "java_docs_search",
+            "description": "Search official Oracle Java documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "python_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "python_docs_search",
+            "description": "Search official Python documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "spring_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "spring_docs_search",
+            "description": "Search official Spring documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "dotnet_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "dotnet_docs_search",
+            "description": "Search official .NET documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "remote_agent_discover": {
+        "type": "function",
+        "function": {
+            "name": "remote_agent_discover",
+            "description": "Fetch a remote A2A agent card over HTTP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_card_url": {"type": "string"},
+                },
+                "required": ["agent_card_url"],
+            },
+        },
+    },
+    "remote_agent_dispatch": {
+        "type": "function",
+        "function": {
+            "name": "remote_agent_dispatch",
+            "description": "Dispatch work to a remote A2A agent over HTTP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_card_url": {"type": "string"},
+                    "input_data": {"type": "object"},
+                    "workflow_run_id": {"type": "string"},
+                    "from_agent": {"type": "string"},
+                    "message_type": {"type": "string", "enum": ["delegation", "context", "alert", "result"]},
+                },
+                "required": ["agent_card_url", "input_data", "workflow_run_id", "from_agent"],
+            },
+        },
+    },
+    "policy_library_search": {
+        "type": "function",
+        "function": {
+            "name": "policy_library_search",
+            "description": "Search uploaded and stored policy documents for relevant policy guidance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "policy_ids": {"type": "array", "items": {"type": "string"}},
+                    "limit": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
     "trigger_hitl": {
         "type": "function",
         "function": {
@@ -110,31 +321,6 @@ TOOL_SCHEMAS: dict[str, dict] = {
 }
 
 
-def _build_tools_payload(tool_names: list[str]) -> list[dict]:
-    """Build the OpenAI tools array for the agent's enabled MCP tools."""
-    return [TOOL_SCHEMAS[name] for name in tool_names if name in TOOL_SCHEMAS]
-
-
-async def _invoke_tool(name: str, args: dict, workflow_run_id: str, agent_name: str, policy_ids: list[str] | None = None) -> dict:
-    """Invoke a tool by name from the TOOL_REGISTRY, auto-injecting workflow context."""
-    fn = TOOL_REGISTRY.get(name)
-    if fn is None:
-        return {"error": f"Tool '{name}' not registered"}
-
-    # Inject workflow context for trigger_hitl so the agent doesn't have to know it
-    if name == "trigger_hitl":
-        args.setdefault("workflow_run_id", workflow_run_id)
-        args.setdefault("agent_name", agent_name)
-    if name == "rules_engine_check" and policy_ids:
-        args.setdefault("policy_ids", policy_ids)
-
-    try:
-        return await fn(**args)
-    except Exception as exc:
-        logger.error("agent.tool.failed", tool=name, error=str(exc), exc_info=True)
-        return {"error": str(exc), "tool": name}
-
-
 async def invoke_agent_by_id(
     agent_config: dict,
     input_data: dict,
@@ -143,157 +329,10 @@ async def invoke_agent_by_id(
     upstream_messages: list[dict] | None = None,
     max_tool_iterations: int = 5,
 ) -> dict:
-    """
-    Invoke a single agent end-to-end.
-
-    Returns dict with: output, tokens_used, latency_ms, tools_called, status, error
-    """
-    agent_name = agent_config["name"]
-    framework = agent_config.get("framework", "langgraph")
-    system_prompt = agent_config.get("system_prompt", "")
-    enabled_tools = agent_config.get("tools", []) or []
-    selected_policy_ids = (input_data.get("original_input") or {}).get("policy_ids", [])
-
-    logger.info("agent.invoke.start", agent_name=agent_name, framework=framework, step=step_number)
-    start = time.perf_counter()
-
-    # Compose the user message from input_data + any upstream A2A messages
-    user_parts = [f"INPUT DATA:\n{json.dumps(input_data, default=str)[:6000]}"]
-    if upstream_messages:
-        upstream_summary = json.dumps(
-            [{"from": m["from_agent"], "type": m["message_type"], "payload": m["payload"]} for m in upstream_messages],
-            default=str,
-        )[:4000]
-        user_parts.append(f"\nUPSTREAM AGENT MESSAGES:\n{upstream_summary}")
-    if selected_policy_ids:
-        user_parts.append(
-            f"\nSELECTED POLICY IDS:\n{json.dumps(selected_policy_ids)}\nUse these policies when performing compliance or redline work."
-        )
-
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt or "You are a helpful AI agent in an enterprise workflow."},
-        {"role": "user", "content": "\n".join(user_parts)},
-    ]
-
-    tools_payload = _build_tools_payload(enabled_tools)
-    tools_called: list[str] = []
-    total_tokens = 0
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-    final_content = ""
-
-    try:
-        for _iteration in range(max_tool_iterations):
-            # Call the LLM with or without tools depending on what the agent has enabled
-            if tools_payload:
-                # Use the raw client to support tools (chat_completion wrapper doesn't expose tools)
-                from core.llm_router import _client  # internal access
-                from config import settings as _settings
-                resp = await _client.chat.completions.create(
-                    model=_settings.LLM_MODEL,
-                    messages=messages,
-                    temperature=0.2,
-                    tools=tools_payload,
-                    tool_choice="auto",
-                )
-                msg = resp.choices[0].message
-                if resp.usage:
-                    total_tokens += resp.usage.total_tokens
-                    total_prompt_tokens += resp.usage.prompt_tokens
-                    total_completion_tokens += resp.usage.completion_tokens
-
-                tool_calls = msg.tool_calls or []
-                if not tool_calls:
-                    final_content = msg.content or ""
-                    break
-
-                # Append assistant tool-call message
-                messages.append({
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                        }
-                        for tc in tool_calls
-                    ],
-                })
-
-                # Execute each tool call
-                for tc in tool_calls:
-                    tool_name = tc.function.name
-                    try:
-                        tool_args = json.loads(tc.function.arguments or "{}")
-                    except json.JSONDecodeError:
-                        tool_args = {}
-                    tool_result = await _invoke_tool(tool_name, tool_args, workflow_run_id, agent_name, selected_policy_ids)
-                    tools_called.append(tool_name)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(tool_result, default=str)[:6000],
-                    })
-            else:
-                # No tools — single shot LLM call
-                result = await chat_completion(messages=messages, caller=f"agent.{agent_name}")
-                final_content = result["content"] or ""
-                total_tokens += result["tokens_used"]
-                total_prompt_tokens += result["prompt_tokens"]
-                total_completion_tokens += result["completion_tokens"]
-                break
-
-        # Try to parse final content as JSON; fall back to raw text
-        output: dict
-        try:
-            # Strip markdown code fences if present
-            stripped = final_content.strip()
-            if stripped.startswith("```"):
-                stripped = stripped.split("```")[1]
-                if stripped.startswith("json"):
-                    stripped = stripped[4:]
-                stripped = stripped.strip().rstrip("`").strip()
-            output = json.loads(stripped) if stripped else {"text": final_content}
-            if not isinstance(output, dict):
-                output = {"result": output}
-        except json.JSONDecodeError:
-            output = {"text": final_content}
-
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.info(
-            "agent.invoke.complete",
-            agent_name=agent_name,
-            tokens=total_tokens,
-            tools_called=tools_called,
-            latency_ms=latency_ms,
-        )
-
-        return {
-            "agent_name": agent_name,
-            "framework": framework,
-            "output": output,
-            "tokens_used": total_tokens,
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "latency_ms": latency_ms,
-            "tools_called": tools_called,
-            "status": "success",
-            "error": None,
-        }
-
-    except Exception as exc:
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.error("agent.invoke.failed", agent_name=agent_name, error=str(exc), exc_info=True)
-        return {
-            "agent_name": agent_name,
-            "framework": framework,
-            "output": {},
-            "tokens_used": total_tokens,
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "latency_ms": latency_ms,
-            "tools_called": tools_called,
-            "status": "failed",
-            "error": str(exc),
-        }
+    return await run_framework_agent(
+        agent_config=agent_config,
+        input_data=input_data,
+        workflow_run_id=workflow_run_id,
+        step_number=step_number,
+        upstream_messages=upstream_messages,
+    )

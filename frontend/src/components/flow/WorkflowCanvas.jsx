@@ -13,8 +13,10 @@ export default function WorkflowCanvas({
   initialEdges = [],
   onChange,
   readOnly = false,
+  activeNodeId = '',
 }) {
   const wrapper = useRef(null)
+  const reactFlowRef = useRef(null)
   const [nodes, setNodes] = useState(initialNodes)
   const [edges, setEdges] = useState(initialEdges)
   const [selected, setSelected] = useState(null)
@@ -23,6 +25,19 @@ export default function WorkflowCanvas({
   useEffect(() => { setEdges(initialEdges) }, [JSON.stringify(initialEdges)])
 
   useEffect(() => { onChange && onChange(nodes, edges) }, [nodes, edges])
+
+  useEffect(() => {
+    if (!activeNodeId || !reactFlowRef.current || nodes.length === 0) return
+    const targetNode = nodes.find((node) => node.id === activeNodeId)
+    if (!targetNode) return
+    window.setTimeout(() => {
+      reactFlowRef.current?.setCenter(
+        targetNode.position.x + 120,
+        targetNode.position.y + 50,
+        { zoom: 1.1, duration: 650 },
+      )
+    }, 40)
+  }, [activeNodeId, nodes])
 
   const onNodesChange = useCallback((changes) => setNodes(ns => applyNodeChanges(changes, ns)), [])
   const onEdgesChange = useCallback((changes) => setEdges(es => applyEdgeChanges(changes, es)), [])
@@ -40,20 +55,36 @@ export default function WorkflowCanvas({
     if (!data) return
     const agent = JSON.parse(data)
     const bounds = wrapper.current.getBoundingClientRect()
-    const position = { x: event.clientX - bounds.left - 100, y: event.clientY - bounds.top - 40 }
+    const screenPosition = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    const flowPosition = reactFlowRef.current?.screenToFlowPosition
+      ? reactFlowRef.current.screenToFlowPosition(screenPosition)
+      : screenPosition
+    const position = { x: flowPosition.x - 115, y: flowPosition.y - 45 }
     const id = `agent_${agent.agent_id}_${Date.now()}`
     setNodes(ns => [...ns, {
       id,
       type: 'agent',
       position,
-      data: {
-        agent_id: agent.agent_id,
-        name: agent.name,
-        framework: agent.framework,
-        system_prompt: agent.system_prompt,
-        tools: agent.tools,
-        hitl_enabled: agent.hitl_enabled,
-      },
+        data: {
+          agent_id: agent.agent_id,
+          name: agent.name,
+          framework: agent.framework,
+          system_prompt: agent.system_prompt,
+          model_name: agent.model_name,
+          tools: agent.tools,
+          hitl_enabled: agent.hitl_enabled,
+          a2a_enabled: agent.a2a_enabled ?? true,
+          a2a_mode: agent.a2a_mode || 'local',
+          remote_agent_card_url: agent.remote_agent_card_url || '',
+          tags: agent.tags || [],
+          input_bindings: {
+            include_text_input: true,
+            include_uploaded_files: true,
+            include_github_repo: true,
+            include_knowledge_base: true,
+            include_upstream_outputs: true,
+          },
+        },
     }])
   }, [readOnly])
 
@@ -92,6 +123,7 @@ export default function WorkflowCanvas({
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         fitView
+        onInit={(instance) => { reactFlowRef.current = instance }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}

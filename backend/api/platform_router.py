@@ -3,8 +3,10 @@ Platform API router — agent registration, listing, retrieval, update, invocati
 """
 import structlog
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from core.agent_code_export import export_agent_code
 from core.request_context import get_optional_user_id
 from db.repositories.agent_repo import AgentRepository
 from core.agent_registry import invoke_agent_by_id
@@ -14,16 +16,37 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 repo = AgentRepository()
 
-VALID_FRAMEWORKS = {"langgraph", "crewai", "langchain"}
+VALID_FRAMEWORKS = {"langgraph", "crewai", "langchain", "agno"}
+AVAILABLE_MODELS = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-5",
+    "gpt-5-mini",
+    "o3",
+    "o4-mini",
+    "claude-3.7-sonnet",
+    "claude-sonnet-4.5",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "llama-3.3-70b-instruct",
+    "phi-4-reasoning",
+]
 
 
 class RegisterAgentRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    framework: str = Field(..., description="langgraph | crewai | langchain")
+    framework: str = Field(..., description="langgraph | crewai | langchain | agno")
     description: str = Field(default="")
     system_prompt: str = Field(..., min_length=10)
+    model_name: str = Field(default="gpt-4o")
     tools: list[str] = Field(default_factory=list)
     hitl_enabled: bool = Field(default=False)
+    tags: list[str] = Field(default_factory=list)
+    a2a_enabled: bool = Field(default=True)
+    a2a_mode: str = Field(default="local", description="local | remote")
+    remote_agent_card_url: str = Field(default="")
 
 
 class InvokeAgentRequest(BaseModel):
@@ -35,6 +58,8 @@ class InvokeAgentRequest(BaseModel):
 async def register_agent(request: Request, body: RegisterAgentRequest):
     if body.framework not in VALID_FRAMEWORKS:
         raise HTTPException(status_code=422, detail=f"Invalid framework. Must be one of: {VALID_FRAMEWORKS}")
+    if body.a2a_mode not in {"local", "remote"}:
+        raise HTTPException(status_code=422, detail="Invalid a2a_mode. Must be 'local' or 'remote'")
     try:
         agent_id = await repo.create({**body.model_dump(), "owner_user_id": get_optional_user_id(request)})
         logger.info("api.agent.registered", agent_id=agent_id, name=body.name)
@@ -118,8 +143,28 @@ async def invoke_agent(agent_id: str, request: Request, body: InvokeAgentRequest
 @router.get("/tools")
 async def list_available_tools():
     """List all MCP tool names available on the platform."""
-    from mcp_tools.tool_server import TOOL_REGISTRY
-    return {"tools": list(TOOL_REGISTRY.keys())}
+    from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
+    tools = [{"name": name, **TOOL_METADATA.get(name, {})} for name in TOOL_REGISTRY.keys()]
+    return {"tools": [tool["name"] for tool in tools], "items": tools}
+
+
+@router.get("/models")
+async def list_available_models():
+    return {"models": AVAILABLE_MODELS, "default": "gpt-4o"}
+
+
+@router.get("/agents/{agent_id}/code")
+async def export_agent(agent_id: str, request: Request, framework: str | None = None):
+    query = {"agent_id": agent_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    agent = await get_db().agents.find_one(query, {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    content, ext = export_agent_code(agent, framework)
+    media_type = "application/json" if ext == "json" else "text/plain"
+    return PlainTextResponse(content, media_type=media_type)
 
 
 

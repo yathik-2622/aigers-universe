@@ -30,12 +30,27 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = Field(default="*")
     LOG_LEVEL: str = Field(default="INFO")
     LOG_JSON_FORMAT: bool = Field(default=False)
+    JWT_SECRET: str = Field(default="change-me-super-secret")
+    JWT_EXPIRES_HOURS: int = Field(default=12)
+    ADMIN_EMAILS: str = Field(default="")
+    GITHUB_TOKEN: str = Field(default="")
+    SERPAPI_KEY: str = Field(default="")
+    OPENWEATHER_API_KEY: str = Field(default="")
+    A2A_SHARED_SECRET: str = Field(default="")
+    A2A_PUBLIC_BASE_URL: str = Field(default="")
+    OFFICIAL_DOCS_MAX_RESULTS: int = Field(default=5)
 
     # FAISS vector store
-    FAISS_INDEX_PATH: str = Field(default="/app/backend/vectorstore/data/faiss_index")
+    FAISS_INDEX_PATH: str = Field(default=str(BASE_DIR / "vectorstore" / "data" / "faiss_index"))
 
     # HITL
     HITL_TIMEOUT_SECONDS: int = Field(default=300)
+
+    # Workflow input governance
+    WORKFLOW_INPUT_RETENTION_DAYS: int = Field(default=7)
+    WORKFLOW_INPUT_MAX_FILES: int = Field(default=6)
+    WORKFLOW_INPUT_MAX_TOTAL_BYTES: int = Field(default=50 * 1024 * 1024)
+    WORKFLOW_INPUT_MAX_TEXT_CHARS: int = Field(default=120000)
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

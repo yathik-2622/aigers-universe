@@ -20,8 +20,13 @@ from api.hitl_router import router as hitl_router
 from api.observability_router import router as observability_router
 from api.marketplace_router import router as marketplace_router
 from api.document_router import router as document_router
+from api.document_router import cleanup_expired_workflow_inputs
 from api.auth_router import router as auth_router
 from api.policy_router import router as policy_router
+from api.project_router import router as project_router
+from api.admin_router import router as admin_router
+from api.tool_chat_router import router as tool_chat_router
+from api.a2a_router import router as a2a_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -33,6 +38,7 @@ async def lifespan(app: FastAPI):
     try:
         await connect_db()
         await run_seed()
+        await cleanup_expired_workflow_inputs()
         register_all_tools()
         logger.info("aigers_universe.startup.complete")
         yield
@@ -75,6 +81,10 @@ app.include_router(marketplace_router, prefix="/api/marketplace", tags=["Marketp
 app.include_router(document_router, prefix="/api/documents", tags=["Documents"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(policy_router, prefix="/api/policies", tags=["Policies"])
+app.include_router(project_router, prefix="/api/projects", tags=["Projects"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+app.include_router(tool_chat_router, prefix="/api/tool-chat", tags=["Tool Chat"])
+app.include_router(a2a_router, prefix="/api/a2a", tags=["A2A"])
 
 
 # Mount FastApiMCP — exposes /mcp endpoint with all registered tools

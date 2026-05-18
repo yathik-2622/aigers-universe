@@ -6,6 +6,8 @@ as the persistent message broker for inter-agent communication audit trail.
 import uuid
 import datetime
 import structlog
+import httpx
+from urllib.parse import urljoin
 
 try:
     from python_a2a import AgentCard, AgentSkill  # noqa: F401  (capability descriptors)
@@ -13,6 +15,7 @@ try:
 except ImportError:
     _A2A_AVAILABLE = False
 
+from config import settings
 from db.mongo_client import get_db
 
 logger = structlog.get_logger(__name__)
@@ -100,3 +103,47 @@ async def get_latest_a2a_message(workflow_run_id: str, from_agent: str) -> dict 
         .to_list(1)
     )
     return msgs[0] if msgs else None
+
+
+def _a2a_headers() -> dict:
+    headers = {"Content-Type": "application/json"}
+    if settings.A2A_SHARED_SECRET.strip():
+        headers["X-AIGERS-A2A-SECRET"] = settings.A2A_SHARED_SECRET.strip()
+    return headers
+
+
+async def fetch_remote_agent_card(agent_card_url: str) -> dict:
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(agent_card_url, headers=_a2a_headers())
+        response.raise_for_status()
+        return response.json()
+
+
+async def dispatch_remote_agent(
+    agent_card_url: str,
+    input_data: dict,
+    workflow_run_id: str,
+    from_agent: str,
+    message_type: str = "delegation",
+) -> dict:
+    card = await fetch_remote_agent_card(agent_card_url)
+    invoke_url = card.get("invoke_url") or urljoin(agent_card_url, "./invoke")
+    payload = {
+        "from_agent": from_agent,
+        "message_type": message_type,
+        "workflow_run_id": workflow_run_id,
+        "input_data": input_data,
+        "agent_card": card,
+    }
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        response = await client.post(invoke_url, json=payload, headers=_a2a_headers())
+        response.raise_for_status()
+        result = response.json()
+    await send_a2a_message(
+        from_agent=from_agent,
+        to_agent=card.get("name", agent_card_url),
+        message_type=message_type,
+        payload={"remote_dispatch": payload, "remote_result": result},
+        workflow_run_id=workflow_run_id,
+    )
+    return {"agent_card": card, "invoke_url": invoke_url, "result": result}

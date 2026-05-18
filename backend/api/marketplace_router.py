@@ -3,8 +3,10 @@ Agent Marketplace API router.
 """
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from core.agent_code_export import export_agent_code
 from core.request_context import get_optional_user_id
 from db.mongo_client import get_db
 from db.repositories.agent_repo import AgentRepository
@@ -20,8 +22,9 @@ class InstallTemplateRequest(BaseModel):
 
 
 @router.get("/templates")
-async def list_templates(search: str | None = Query(default=None)):
+async def list_templates(request: Request, search: str | None = Query(default=None)):
     db = get_db()
+    user_id = get_optional_user_id(request)
     query: dict = {}
     if search:
         query["$or"] = [
@@ -29,7 +32,39 @@ async def list_templates(search: str | None = Query(default=None)):
             {"description": {"$regex": search, "$options": "i"}},
         ]
     templates = await db.marketplace_templates.find(query, {"_id": 0}).to_list(100)
+    if user_id:
+        installed = await db.agents.find({"owner_user_id": user_id, "status": "active", "template_id": {"$exists": True}}, {"_id": 0, "template_id": 1, "agent_id": 1}).to_list(500)
+        installed_map = {row["template_id"]: row["agent_id"] for row in installed}
+        for tpl in templates:
+            tpl["installed"] = tpl["template_id"] in installed_map
+            tpl["installed_agent_id"] = installed_map.get(tpl["template_id"])
+    else:
+        for tpl in templates:
+            tpl["installed"] = False
+            tpl["installed_agent_id"] = None
     return {"templates": templates, "count": len(templates)}
+
+
+@router.get("/templates/{template_id}/code")
+async def template_code(template_id: str, framework: str | None = None):
+    db = get_db()
+    tpl = await db.marketplace_templates.find_one({"template_id": template_id}, {"_id": 0})
+    if not tpl:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    content, ext = export_agent_code(
+        {
+            "name": tpl["name"],
+            "framework": tpl["framework"],
+            "description": tpl.get("description", ""),
+            "system_prompt": tpl.get("default_system_prompt", ""),
+            "model_name": tpl.get("default_model_name", "gpt-4o"),
+            "tools": tpl.get("suggested_tools", []),
+            "tags": tpl.get("tags", []),
+        },
+        framework,
+    )
+    media_type = "application/json" if ext == "json" else "text/plain"
+    return PlainTextResponse(content, media_type=media_type)
 
 
 @router.post("/templates/{template_id}/install", status_code=201)
@@ -71,8 +106,11 @@ async def install_template(template_id: str, request: Request, body: InstallTemp
         "framework": tpl["framework"],
         "description": tpl["description"],
         "system_prompt": body.custom_system_prompt or tpl["default_system_prompt"],
+        "model_name": tpl.get("default_model_name", "gpt-4o"),
         "tools": tpl.get("suggested_tools", []),
         "hitl_enabled": tpl.get("hitl_enabled", False),
+        "tags": tpl.get("tags", []),
+        "a2a_enabled": tpl.get("a2a_enabled", True),
         "template_id": template_id,
         "owner_user_id": user_id,
     }

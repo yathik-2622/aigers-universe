@@ -12,6 +12,9 @@ import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import MarketplacePage from './pages/MarketplacePage.jsx'
 import ObservabilityPage from './pages/ObservabilityPage.jsx'
+import ProjectsPage from './pages/ProjectsPage.jsx'
+import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
 
@@ -29,13 +32,16 @@ function ProtectedShell() {
           <main className="flex-1 min-h-0 overflow-y-auto bg-grid">
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/builder" element={<WorkflowBuilderPage />} />
               <Route path="/builder/:workflowId" element={<WorkflowBuilderPage />} />
+              <Route path="/tools-chat" element={<ToolPlaygroundPage />} />
               <Route path="/runs/:runId" element={<WorkflowRunPage />} />
               <Route path="/hitl" element={<HITLPage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>
@@ -57,7 +63,14 @@ export default function App() {
         theme="dark"
         position="bottom-right"
         toastOptions={{
-          style: { background: '#161623', border: '1px solid #1f1f33', color: '#e9e9f7' },
+          style: {
+            background: 'linear-gradient(180deg, rgba(15,19,36,0.96), rgba(10,12,24,0.96))',
+            border: '1px solid rgba(255,255,255,0.12)',
+            color: '#e9e9f7',
+            borderRadius: '18px',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 18px 60px rgba(0,0,0,0.28)',
+          },
         }}
       />
     </>

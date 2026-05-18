@@ -34,6 +34,106 @@ class WorkflowState(TypedDict, total=False):
     failure_reason: str
 
 
+DEFAULT_INPUT_BINDINGS = {
+    "include_text_input": True,
+    "include_uploaded_files": True,
+    "include_github_repo": True,
+    "include_knowledge_base": True,
+    "include_upstream_outputs": True,
+}
+
+
+async def _hydrate_workflow_inputs(input_data: dict) -> dict:
+    workflow_inputs = dict((input_data or {}).get("workflow_inputs") or {})
+    upload_ids = workflow_inputs.get("upload_document_ids") or []
+    repo_document_id = workflow_inputs.get("repo_document_id")
+    if not upload_ids and not repo_document_id:
+        return input_data
+
+    db = get_db()
+    all_ids = list(dict.fromkeys([*upload_ids, *([repo_document_id] if repo_document_id else [])]))
+    docs = await db.documents.find(
+        {"document_id": {"$in": all_ids}},
+        {"_id": 0, "document_id": 1, "filename": 1, "category": 1, "text": 1, "text_length": 1, "source_meta": 1, "scope": 1},
+    ).to_list(len(all_ids) or 1)
+    docs_by_id = {doc["document_id"]: doc for doc in docs}
+
+    workflow_inputs["uploaded_files"] = [
+        {
+            "document_id": doc_id,
+            "filename": docs_by_id[doc_id].get("filename", ""),
+            "category": docs_by_id[doc_id].get("category", ""),
+            "scope": docs_by_id[doc_id].get("scope", "workflow_input"),
+            "text_length": docs_by_id[doc_id].get("text_length", 0),
+            "text_excerpt": (docs_by_id[doc_id].get("text", "") or "")[:6000],
+        }
+        for doc_id in upload_ids
+        if doc_id in docs_by_id
+    ]
+    if repo_document_id and repo_document_id in docs_by_id:
+        repo_doc = docs_by_id[repo_document_id]
+        workflow_inputs["github_repo"] = {
+            "document_id": repo_document_id,
+            "filename": repo_doc.get("filename", ""),
+            "repo_url": (repo_doc.get("source_meta") or {}).get("repo_url", workflow_inputs.get("repo_url", "")),
+            "text_length": repo_doc.get("text_length", 0),
+            "text_excerpt": (repo_doc.get("text", "") or "")[:10000],
+        }
+
+    return {**(input_data or {}), "workflow_inputs": workflow_inputs}
+
+
+def _compose_agent_input(state: WorkflowState, agent_config: dict) -> dict:
+    original_input = dict(state["input_data"] or {})
+    bindings = {**DEFAULT_INPUT_BINDINGS, **(agent_config.get("input_bindings") or {})}
+    workflow_inputs = dict(original_input.get("workflow_inputs") or {})
+
+    if not bindings["include_text_input"]:
+        workflow_inputs.pop("text", None)
+        original_input.pop("user_prompt", None)
+    if not bindings["include_uploaded_files"]:
+        workflow_inputs.pop("uploaded_files", None)
+        workflow_inputs.pop("upload_document_ids", None)
+    if not bindings["include_github_repo"]:
+        workflow_inputs.pop("github_repo", None)
+        workflow_inputs.pop("repo_document_id", None)
+        workflow_inputs.pop("repo_url", None)
+    if not bindings["include_knowledge_base"]:
+        original_input.pop("document_id", None)
+        original_input.pop("filename", None)
+        original_input["kb_mode"] = "disabled"
+
+    original_input["workflow_inputs"] = workflow_inputs
+    input_payload = {"original_input": original_input}
+    if bindings["include_upstream_outputs"]:
+        input_payload["previous_outputs"] = state.get("outputs", {})
+    return input_payload
+
+
+def _resolve_agent_configs(wf: dict, stored_agents: list[dict]) -> list[dict]:
+    canvas_nodes = (wf.get("canvas") or {}).get("nodes") or []
+    if not canvas_nodes:
+        return stored_agents
+    node_lookup = {node.get("data", {}).get("agent_id"): node for node in canvas_nodes if node.get("data", {}).get("agent_id")}
+    sorted_nodes = sorted(canvas_nodes, key=lambda node: node.get("position", {}).get("x", 0))
+    stored_lookup = {agent["agent_id"]: agent for agent in stored_agents}
+    resolved = []
+    for node in sorted_nodes:
+        agent_id = node.get("data", {}).get("agent_id")
+        if not agent_id or agent_id not in stored_lookup:
+            continue
+        overrides = node.get("data", {})
+        base = dict(stored_lookup[agent_id])
+        for key in ("name", "framework", "system_prompt", "model_name", "tools", "hitl_enabled", "input_bindings", "a2a_enabled", "a2a_mode", "remote_agent_card_url", "tags"):
+            if key in overrides:
+                base[key] = overrides[key]
+        base["workflow_node_id"] = node.get("id")
+        resolved.append(base)
+    if resolved:
+        return resolved
+    return [dict(stored_lookup[agent["agent_id"]], workflow_node_id=node_lookup.get(agent["agent_id"], {}).get("id")) for agent in stored_agents]
+
+
 async def _wait_for_hitl_resume(hitl_id: str, run_id: str) -> dict:
     db = get_db()
     event = resume_signals.get_or_create_event(hitl_id)
@@ -69,7 +169,7 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
     )
 
     upstream_messages = await get_a2a_messages(workflow_run_id=run_id) if step_idx > 0 else []
-    input_data = {"original_input": state["input_data"], "previous_outputs": state.get("outputs", {})}
+    input_data = _compose_agent_input(state, agent_config)
 
     result = await invoke_agent_by_id(
         agent_config=agent_config,
@@ -189,6 +289,7 @@ async def _finalize_run(run_id: str, state: WorkflowState) -> None:
                     "report_markdown": report["markdown"],
                     "report_structured": report["structured"],
                     "pii_findings": report["pii_findings"],
+                    "citations": report["citations"],
                     "updated_at": datetime.datetime.utcnow().isoformat(),
                 }
             },
@@ -248,23 +349,54 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
     if not wf:
         raise ValueError(f"Workflow '{workflow_id}' not found")
 
-    agent_configs: list[dict] = []
+    stored_agent_configs: list[dict] = []
     for agent_id in wf["agents"]:
         cfg = await agent_repo.get_by_id(agent_id)
         if not cfg:
             raise ValueError(f"Agent '{agent_id}' referenced in workflow not found")
-        agent_configs.append(cfg)
+        stored_agent_configs.append(cfg)
+    agent_configs = _resolve_agent_configs(wf, stored_agent_configs)
     if len(agent_configs) < 2:
         raise ValueError("Workflow must have at least 2 agents")
 
+    hydrated_input_data = await _hydrate_workflow_inputs(input_data)
+    workflow_inputs = hydrated_input_data.get("workflow_inputs") or {}
+    upload_doc_ids = workflow_inputs.get("upload_document_ids") or []
+    if len(upload_doc_ids) > settings.WORKFLOW_INPUT_MAX_FILES:
+        raise ValueError(f"Workflow input file count exceeds limit ({settings.WORKFLOW_INPUT_MAX_FILES})")
+    total_text_chars = len((workflow_inputs.get("text") or ""))
+    total_file_bytes = 0
+    for item in workflow_inputs.get("uploaded_files") or []:
+        total_text_chars += len(item.get("text_excerpt") or "")
+    github_repo = workflow_inputs.get("github_repo") or {}
+    total_text_chars += len(github_repo.get("text_excerpt") or "")
+    all_ids = [*upload_doc_ids, *([workflow_inputs.get("repo_document_id")] if workflow_inputs.get("repo_document_id") else [])]
+    if all_ids:
+        docs = await db.documents.find({"document_id": {"$in": all_ids}}, {"_id": 0, "file_size_bytes": 1}).to_list(len(all_ids))
+        total_file_bytes = sum(int(doc.get("file_size_bytes", 0) or 0) for doc in docs)
+    if total_file_bytes > settings.WORKFLOW_INPUT_MAX_TOTAL_BYTES:
+        raise ValueError(f"Workflow input total file size exceeds limit ({settings.WORKFLOW_INPUT_MAX_TOTAL_BYTES} bytes)")
+    if total_text_chars > settings.WORKFLOW_INPUT_MAX_TEXT_CHARS:
+        raise ValueError(f"Workflow input text exceeds limit ({settings.WORKFLOW_INPUT_MAX_TEXT_CHARS} chars)")
     run_id = str(uuid.uuid4())
+    if all_ids:
+        await db.documents.update_many(
+            {"document_id": {"$in": all_ids}},
+            {
+                "$set": {
+                    "workflow_run_id": run_id,
+                    "retention_expires_at": (datetime.datetime.utcnow() + datetime.timedelta(days=settings.WORKFLOW_INPUT_RETENTION_DAYS)).isoformat(),
+                }
+            },
+        )
     started_at = datetime.datetime.utcnow().isoformat()
     await db.workflow_runs.insert_one(
         {
             "run_id": run_id,
             "workflow_id": workflow_id,
             "workflow_name": wf.get("name", ""),
-            "input_data": input_data,
+            "project_id": wf.get("project_id"),
+            "input_data": hydrated_input_data,
             "policy_ids": wf.get("policy_ids", []),
             "owner_user_id": owner_user_id or wf.get("owner_user_id"),
             "agents": [{"agent_id": a["agent_id"], "agent_name": a["name"]} for a in agent_configs],
@@ -286,7 +418,7 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
     initial_state: WorkflowState = {
         "workflow_run_id": run_id,
         "owner_user_id": owner_user_id or wf.get("owner_user_id"),
-        "input_data": {**input_data, "policy_ids": wf.get("policy_ids", [])},
+        "input_data": {**hydrated_input_data, "policy_ids": wf.get("policy_ids", [])},
         "agents": agent_configs,
         "current_step": 0,
         "outputs": {},

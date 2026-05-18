@@ -20,15 +20,15 @@ body {
 }
 
 ::selection {
-  background: #7c5cff;
+  background: #00d5ff;
   color: white;
 }
 
 /* Subtle grid background */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(124, 92, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(124, 92, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(0, 213, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(138, 92, 246, 0.035) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
@@ -80,6 +80,10 @@ body {
   border-bottom: 1px solid #1f1f33 !important;
   color: #e9e9f7 !important;
 }
+.react-flow__controls button svg {
+  fill: #f8fafc !important;
+  stroke: #f8fafc !important;
+}
 .react-flow__minimap {
   background: #11111a !important;
   border: 1px solid #1f1f33 !important;
@@ -92,6 +96,31 @@ body {
 /* Card hover */
 .card-hover { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
 .card-hover:hover { transform: translateY(-1px); border-color: rgba(124, 92, 255, 0.5); }
+
+.glass-select {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)),
+    rgba(10, 14, 26, 0.55);
+  color: #e9e9f7;
+  backdrop-filter: blur(12px);
+}
+
+.glass-select option {
+  background: #0f1324;
+  color: #e9e9f7;
+}
+
+.glass-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  background:
+    radial-gradient(circle at top left, rgba(0, 213, 255, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(138, 92, 246, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.18);
+}
 
 /* Pulse status */
 @keyframes glowPulse {

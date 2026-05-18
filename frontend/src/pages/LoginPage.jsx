@@ -30,7 +30,7 @@ export default function LoginPage() {
       <form onSubmit={submit} className="w-full max-w-md rounded-3xl border border-line bg-panel/70 backdrop-blur p-8 shadow-2xl shadow-black/20">
         <div className="text-[11px] uppercase tracking-[0.18em] text-accent mb-2">Secure workspace access</div>
         <h1 className="font-display text-3xl tracking-tight">Sign in to resume your workflows</h1>
-        <p className="text-sm text-muted mt-3">Your runs, uploaded documents, and pending reviews are linked to your Mongo user record.</p>
+        <p className="text-sm text-muted mt-3">Your runs, uploaded documents, projects, and pending reviews are linked to your signed-in workspace identity.</p>
         <div className="mt-6 space-y-4">
           <input
             value={form.display_name}
@@ -41,11 +41,11 @@ export default function LoginPage() {
           <input
             value={form.email}
             onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-            placeholder="Work email (optional)"
+            placeholder="Work email"
             className="w-full rounded-xl border border-line bg-elev/60 px-4 py-3 text-sm outline-none focus:border-accent/40"
           />
         </div>
-        <button disabled={busy || !form.display_name.trim()} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+        <button disabled={busy || !form.display_name.trim() || !form.email.trim()} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
           {busy ? 'Signing in…' : 'Continue'}
         </button>
       </form>
