@@ -2,9 +2,10 @@
 Agent Marketplace API router.
 """
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from core.request_context import get_optional_user_id
 from db.mongo_client import get_db
 from db.repositories.agent_repo import AgentRepository
 
@@ -32,7 +33,7 @@ async def list_templates(search: str | None = Query(default=None)):
 
 
 @router.post("/templates/{template_id}/install", status_code=201)
-async def install_template(template_id: str, request: InstallTemplateRequest):
+async def install_template(template_id: str, request: Request, body: InstallTemplateRequest):
     """
     Install a marketplace template as a new registered agent.
 
@@ -47,12 +48,13 @@ async def install_template(template_id: str, request: InstallTemplateRequest):
     if not tpl:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
-    is_default_install = not request.custom_name and not request.custom_system_prompt
+    user_id = get_optional_user_id(request)
+    is_default_install = not body.custom_name and not body.custom_system_prompt
 
     # Idempotency check — only when caller is not customising the install
     if is_default_install:
         existing = await db.agents.find_one(
-            {"template_id": template_id, "status": "active"},
+            {"template_id": template_id, "status": "active", "owner_user_id": user_id},
             {"_id": 0, "agent_id": 1, "name": 1},
         )
         if existing:
@@ -65,13 +67,14 @@ async def install_template(template_id: str, request: InstallTemplateRequest):
             }
 
     agent_data = {
-        "name": request.custom_name or tpl["name"],
+        "name": body.custom_name or tpl["name"],
         "framework": tpl["framework"],
         "description": tpl["description"],
-        "system_prompt": request.custom_system_prompt or tpl["default_system_prompt"],
+        "system_prompt": body.custom_system_prompt or tpl["default_system_prompt"],
         "tools": tpl.get("suggested_tools", []),
         "hitl_enabled": tpl.get("hitl_enabled", False),
         "template_id": template_id,
+        "owner_user_id": user_id,
     }
     agent_id = await repo.create(agent_data)
     return {

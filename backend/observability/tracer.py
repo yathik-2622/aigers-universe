@@ -11,6 +11,7 @@ logger = structlog.get_logger(__name__)
 
 async def record_trace(
     workflow_run_id: str,
+    owner_user_id: str | None,
     agent_id: str,
     agent_name: str,
     framework: str,
@@ -29,6 +30,7 @@ async def record_trace(
     db = get_db()
     trace = {
         "workflow_run_id": workflow_run_id,
+        "owner_user_id": owner_user_id,
         "agent_id": agent_id,
         "agent_name": agent_name,
         "framework": framework,
@@ -51,13 +53,15 @@ async def record_trace(
         raise
 
 
-async def get_aggregate_metrics() -> dict:
+async def get_aggregate_metrics(owner_user_id: str | None = None) -> dict:
     """Compute aggregate metrics across all traces for the dashboard."""
     db = get_db()
 
     # Total counts
-    total_runs = await db.workflow_runs.count_documents({})
-    total_traces = await db.agent_traces.count_documents({})
+    run_query = {"owner_user_id": owner_user_id} if owner_user_id else {}
+    trace_query = {"owner_user_id": owner_user_id} if owner_user_id else {}
+    total_runs = await db.workflow_runs.count_documents(run_query)
+    total_traces = await db.agent_traces.count_documents(trace_query)
 
     # Token + latency totals via aggregation
     pipeline_totals = [
@@ -70,7 +74,7 @@ async def get_aggregate_metrics() -> dict:
             }
         }
     ]
-    totals_cursor = db.agent_traces.aggregate(pipeline_totals)
+    totals_cursor = db.agent_traces.aggregate(([{"$match": trace_query}] if trace_query else []) + pipeline_totals)
     totals_list = await totals_cursor.to_list(1)
     totals = totals_list[0] if totals_list else {"total_tokens": 0, "avg_latency_ms": 0.0, "total_latency_ms": 0.0}
 
@@ -86,7 +90,7 @@ async def get_aggregate_metrics() -> dict:
         },
         {"$sort": {"tokens": -1}},
     ]
-    per_agent_cursor = db.agent_traces.aggregate(per_agent_pipeline)
+    per_agent_cursor = db.agent_traces.aggregate(([{"$match": trace_query}] if trace_query else []) + per_agent_pipeline)
     per_agent = [
         {
             "agent_name": doc["_id"],
@@ -111,7 +115,7 @@ async def get_aggregate_metrics() -> dict:
     ]
     timeline = [
         {"date": doc["_id"], "runs": doc["count"]}
-        for doc in await db.workflow_runs.aggregate(timeline_pipeline).to_list(30)
+        for doc in await db.workflow_runs.aggregate(([{"$match": run_query}] if run_query else []) + timeline_pipeline).to_list(30)
     ]
 
     # Rough cost estimate ($2.50 per 1M input + $10 per 1M output tokens for gpt-4o)

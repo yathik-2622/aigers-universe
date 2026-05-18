@@ -20,6 +20,8 @@ from api.hitl_router import router as hitl_router
 from api.observability_router import router as observability_router
 from api.marketplace_router import router as marketplace_router
 from api.document_router import router as document_router
+from api.auth_router import router as auth_router
+from api.policy_router import router as policy_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -71,6 +73,8 @@ app.include_router(hitl_router, prefix="/api/hitl", tags=["HITL"])
 app.include_router(observability_router, prefix="/api/observability", tags=["Observability"])
 app.include_router(marketplace_router, prefix="/api/marketplace", tags=["Marketplace"])
 app.include_router(document_router, prefix="/api/documents", tags=["Documents"])
+app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+app.include_router(policy_router, prefix="/api/policies", tags=["Policies"])
 
 
 # Mount FastApiMCP — exposes /mcp endpoint with all registered tools

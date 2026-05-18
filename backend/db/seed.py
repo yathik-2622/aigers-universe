@@ -60,8 +60,11 @@ MARKETPLACE_TEMPLATES = [
         "description": "Checks content against governance rules. Pauses workflow for human review on violations.",
         "default_system_prompt": (
             "You are a compliance officer. Use the rules_engine_check tool to validate the content. "
+            "If selected policy IDs are present in the input, use them when checking compliance. "
+            "Identify policy violations, PII that should be redacted, and concrete remediation guidance. "
             "If any HIGH severity rule is violated, call trigger_hitl with severity=HIGH and a clear reason. "
-            "Return JSON: {\"compliance_status\": \"PASS\"|\"FAIL\"|\"REVIEW\", \"violations\": [...]}."
+            "Return JSON: {\"compliance_status\": \"PASS\"|\"FAIL\"|\"REVIEW\", \"violations\": [...], "
+            "\"pii_findings\": [...], \"redlines\": [...], \"recommended_fixes\": [...]}."
         ),
         "suggested_tools": ["rules_engine_check", "trigger_hitl"],
         "hitl_enabled": True,

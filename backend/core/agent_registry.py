@@ -68,6 +68,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
                 "properties": {
                     "text": {"type": "string"},
                     "rule_category": {"type": "string"},
+                    "policy_ids": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["text"],
             },
@@ -114,7 +115,7 @@ def _build_tools_payload(tool_names: list[str]) -> list[dict]:
     return [TOOL_SCHEMAS[name] for name in tool_names if name in TOOL_SCHEMAS]
 
 
-async def _invoke_tool(name: str, args: dict, workflow_run_id: str, agent_name: str) -> dict:
+async def _invoke_tool(name: str, args: dict, workflow_run_id: str, agent_name: str, policy_ids: list[str] | None = None) -> dict:
     """Invoke a tool by name from the TOOL_REGISTRY, auto-injecting workflow context."""
     fn = TOOL_REGISTRY.get(name)
     if fn is None:
@@ -124,6 +125,8 @@ async def _invoke_tool(name: str, args: dict, workflow_run_id: str, agent_name: 
     if name == "trigger_hitl":
         args.setdefault("workflow_run_id", workflow_run_id)
         args.setdefault("agent_name", agent_name)
+    if name == "rules_engine_check" and policy_ids:
+        args.setdefault("policy_ids", policy_ids)
 
     try:
         return await fn(**args)
@@ -149,6 +152,7 @@ async def invoke_agent_by_id(
     framework = agent_config.get("framework", "langgraph")
     system_prompt = agent_config.get("system_prompt", "")
     enabled_tools = agent_config.get("tools", []) or []
+    selected_policy_ids = (input_data.get("original_input") or {}).get("policy_ids", [])
 
     logger.info("agent.invoke.start", agent_name=agent_name, framework=framework, step=step_number)
     start = time.perf_counter()
@@ -161,6 +165,10 @@ async def invoke_agent_by_id(
             default=str,
         )[:4000]
         user_parts.append(f"\nUPSTREAM AGENT MESSAGES:\n{upstream_summary}")
+    if selected_policy_ids:
+        user_parts.append(
+            f"\nSELECTED POLICY IDS:\n{json.dumps(selected_policy_ids)}\nUse these policies when performing compliance or redline work."
+        )
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt or "You are a helpful AI agent in an enterprise workflow."},
@@ -220,7 +228,7 @@ async def invoke_agent_by_id(
                         tool_args = json.loads(tc.function.arguments or "{}")
                     except json.JSONDecodeError:
                         tool_args = {}
-                    tool_result = await _invoke_tool(tool_name, tool_args, workflow_run_id, agent_name)
+                    tool_result = await _invoke_tool(tool_name, tool_args, workflow_run_id, agent_name, selected_policy_ids)
                     tools_called.append(tool_name)
                     messages.append({
                         "role": "tool",

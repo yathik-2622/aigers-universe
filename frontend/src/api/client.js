@@ -8,6 +8,20 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+api.interceptors.request.use((config) => {
+  try {
+    const raw = localStorage.getItem('aigers.user')
+    if (raw) {
+      const user = JSON.parse(raw)
+      if (user?.user_id) {
+        config.headers = config.headers || {}
+        config.headers['X-User-Id'] = user.user_id
+      }
+    }
+  } catch {}
+  return config
+})
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {

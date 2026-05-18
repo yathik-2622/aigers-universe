@@ -62,13 +62,15 @@ async def document_store_impl(action: str, collection: str, data: dict | None = 
     raise ValueError(f"Invalid action '{action}'. Must be 'store' or 'retrieve'.")
 
 
-async def rules_engine_check_impl(text: str, rule_category: str | None = None) -> dict:
+async def rules_engine_check_impl(text: str, rule_category: str | None = None, policy_ids: list[str] | None = None) -> dict:
     """Check text against governance rules in MongoDB via LLM reasoning."""
     logger.info("tool.rules_engine.called", category=rule_category, text_length=len(text))
     db = get_db()
     query_filter: dict = {}
+    if policy_ids:
+        query_filter["rule_id"] = {"$in": policy_ids}
     if rule_category:
-        query_filter["applicable_to"] = {"$in": [rule_category]}
+        query_filter["applicable_to"] = {"$in": [rule_category, "all"]}
 
     rules = await db.governance_rules.find(query_filter, {"_id": 0}).to_list(100)
     if not rules:
@@ -139,9 +141,11 @@ async def trigger_hitl_impl(
 
     db = get_db()
     hitl_id = str(uuid.uuid4())
+    run = await db.workflow_runs.find_one({"run_id": workflow_run_id}, {"_id": 0, "owner_user_id": 1})
     record = {
         "hitl_id": hitl_id,
         "workflow_run_id": workflow_run_id,
+        "owner_user_id": (run or {}).get("owner_user_id"),
         "agent_name": agent_name,
         "reason": reason,
         "severity": severity,
@@ -175,9 +179,9 @@ async def document_store(action: str, collection: str, data: dict | None = None,
 
 
 @mcp.tool
-async def rules_engine_check(text: str, rule_category: str | None = None) -> dict:
+async def rules_engine_check(text: str, rule_category: str | None = None, policy_ids: list[str] | None = None) -> dict:
     """Check text against governance rules in MongoDB. Returns violations and overall status."""
-    return await rules_engine_check_impl(text=text, rule_category=rule_category)
+    return await rules_engine_check_impl(text=text, rule_category=rule_category, policy_ids=policy_ids)
 
 
 @mcp.tool

@@ -6,12 +6,13 @@ import json
 import uuid
 import datetime
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from db.mongo_client import get_db
-from core.workflow_engine import build_and_run_workflow
+from core.request_context import get_optional_user_id
+from core.workflow_engine import build_and_run_workflow, resume_workflow_run
 from a2a.agent_communication import get_a2a_messages
 
 logger = structlog.get_logger(__name__)
@@ -23,6 +24,7 @@ class CreateWorkflowRequest(BaseModel):
     description: str = Field(default="")
     agents: list[str] = Field(..., description="Ordered list of agent_ids")
     input_type: str = Field(default="document")
+    policy_ids: list[str] = Field(default_factory=list)
     canvas: dict = Field(default_factory=dict, description="ReactFlow nodes+edges JSON for restoring the canvas")
 
     @field_validator("agents")
@@ -38,43 +40,56 @@ class RunWorkflowRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_workflow(request: CreateWorkflowRequest):
+async def create_workflow(request: Request, body: CreateWorkflowRequest):
     db = get_db()
     workflow_id = str(uuid.uuid4())
     doc = {
         "workflow_id": workflow_id,
-        **request.model_dump(),
+        **body.model_dump(),
+        "owner_user_id": get_optional_user_id(request),
         "created_at": datetime.datetime.utcnow().isoformat(),
     }
     await db.workflow_definitions.insert_one(doc)
-    logger.info("api.workflow.created", workflow_id=workflow_id, name=request.name)
-    return {"workflow_id": workflow_id, "name": request.name}
+    logger.info("api.workflow.created", workflow_id=workflow_id, name=body.name)
+    return {"workflow_id": workflow_id, "name": body.name}
 
 
 @router.get("")
-async def list_workflows():
+async def list_workflows(request: Request):
     db = get_db()
-    workflows = await db.workflow_definitions.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    query = {}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    workflows = await db.workflow_definitions.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"workflows": workflows, "count": len(workflows)}
 
 
 @router.get("/{workflow_id}")
-async def get_workflow(workflow_id: str):
+async def get_workflow(workflow_id: str, request: Request):
     db = get_db()
-    wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0})
+    query = {"workflow_id": workflow_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    wf = await db.workflow_definitions.find_one(query, {"_id": 0})
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
     return wf
 
 
 @router.post("/{workflow_id}/run", status_code=status.HTTP_202_ACCEPTED)
-async def run_workflow(workflow_id: str, request: RunWorkflowRequest):
+async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequest):
     db = get_db()
-    wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id})
+    query = {"workflow_id": workflow_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    wf = await db.workflow_definitions.find_one(query)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
     try:
-        run_id = await build_and_run_workflow(workflow_id=workflow_id, input_data=request.input_data)
+        run_id = await build_and_run_workflow(workflow_id=workflow_id, input_data=body.input_data, owner_user_id=user_id)
         return {"run_id": run_id, "status": "running"}
     except Exception as exc:
         logger.error("api.workflow.run_failed", workflow_id=workflow_id, error=str(exc), exc_info=True)
@@ -82,16 +97,24 @@ async def run_workflow(workflow_id: str, request: RunWorkflowRequest):
 
 
 @router.get("/runs/all")
-async def list_all_runs(limit: int = 50):
+async def list_all_runs(request: Request, limit: int = 50):
     db = get_db()
-    runs = await db.workflow_runs.find({}, {"_id": 0}).sort("started_at", -1).limit(limit).to_list(limit)
+    query = {}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    runs = await db.workflow_runs.find(query, {"_id": 0}).sort("started_at", -1).limit(limit).to_list(limit)
     return {"runs": runs, "count": len(runs)}
 
 
 @router.get("/runs/{run_id}")
-async def get_run_status(run_id: str):
+async def get_run_status(run_id: str, request: Request):
     db = get_db()
-    run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0})
+    query = {"run_id": run_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    run = await db.workflow_runs.find_one(query, {"_id": 0})
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     # Attach A2A messages live
@@ -100,9 +123,13 @@ async def get_run_status(run_id: str):
 
 
 @router.get("/runs/{run_id}/report")
-async def get_run_report(run_id: str):
+async def get_run_report(run_id: str, request: Request):
     db = get_db()
-    run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0})
+    query = {"run_id": run_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    run = await db.workflow_runs.find_one(query, {"_id": 0})
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     if run["status"] not in ("completed", "failed"):
@@ -112,13 +139,33 @@ async def get_run_report(run_id: str):
         "status": run["status"],
         "report": run.get("final_output", {}),
         "outputs_by_agent": run.get("outputs_by_agent", {}),
+        "markdown": run.get("report_markdown", ""),
+        "structured": run.get("report_structured", {}),
+        "pii_findings": run.get("pii_findings", []),
         "failure_reason": run.get("failure_reason"),
     }
 
 
+@router.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str, request: Request):
+    db = get_db()
+    query = {"run_id": run_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    run = await db.workflow_runs.find_one(query, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    try:
+        return await resume_workflow_run(run_id)
+    except Exception as exc:
+        logger.error("api.workflow.resume_failed", run_id=run_id, error=str(exc), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to resume workflow: {exc}")
+
+
 
 @router.get("/runs/{run_id}/stream")
-async def stream_run(run_id: str):
+async def stream_run(run_id: str, request: Request):
     """
     Server-Sent Events stream of run state.
 
@@ -135,7 +182,11 @@ async def stream_run(run_id: str):
         max_idle_loops = 600  # ~5 min @ 500ms — guards against orphaned streams
 
         while True:
-            run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0})
+            query = {"run_id": run_id}
+            user_id = get_optional_user_id(request)
+            if user_id:
+                query["owner_user_id"] = user_id
+            run = await db.workflow_runs.find_one(query, {"_id": 0})
             if not run:
                 yield f"event: error\ndata: {json.dumps({'error': 'run not found'})}\n\n"
                 return

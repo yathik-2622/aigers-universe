@@ -6,8 +6,9 @@ import io
 import uuid
 import datetime
 import structlog
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
 
+from core.request_context import get_optional_user_id
 from db.mongo_client import get_db
 from vectorstore.faiss_store import add_document
 
@@ -33,7 +34,7 @@ def _extract_docx_text(file_bytes: bytes) -> str:
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(request: Request, file: UploadFile = File(...)):
     filename = file.filename or "unnamed"
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -80,6 +81,7 @@ async def upload_document(file: UploadFile = File(...)):
     db = get_db()
     await db.documents.insert_one({
         "document_id": document_id,
+        "owner_user_id": get_optional_user_id(request),
         "filename": filename,
         "file_type": ext,
         "text": text,
@@ -101,16 +103,24 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @router.get("")
-async def list_documents():
+async def list_documents(request: Request):
     db = get_db()
-    docs = await db.documents.find({}, {"_id": 0, "text": 0, "vector_ids": 0}).sort("uploaded_at", -1).to_list(200)
+    query = {}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    docs = await db.documents.find(query, {"_id": 0, "text": 0, "vector_ids": 0}).sort("uploaded_at", -1).to_list(200)
     return {"documents": docs, "count": len(docs)}
 
 
 @router.get("/{document_id}")
-async def get_document(document_id: str):
+async def get_document(document_id: str, request: Request):
     db = get_db()
-    doc = await db.documents.find_one({"document_id": document_id}, {"_id": 0, "vector_ids": 0})
+    query = {"document_id": document_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    doc = await db.documents.find_one(query, {"_id": 0, "vector_ids": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
     return doc

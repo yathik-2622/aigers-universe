@@ -2,11 +2,13 @@
 Platform API router — agent registration, listing, retrieval, update, invocation.
 """
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from core.request_context import get_optional_user_id
 from db.repositories.agent_repo import AgentRepository
 from core.agent_registry import invoke_agent_by_id
+from db.mongo_client import get_db
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -30,34 +32,49 @@ class InvokeAgentRequest(BaseModel):
 
 
 @router.post("/agents", status_code=status.HTTP_201_CREATED)
-async def register_agent(request: RegisterAgentRequest):
-    if request.framework not in VALID_FRAMEWORKS:
+async def register_agent(request: Request, body: RegisterAgentRequest):
+    if body.framework not in VALID_FRAMEWORKS:
         raise HTTPException(status_code=422, detail=f"Invalid framework. Must be one of: {VALID_FRAMEWORKS}")
     try:
-        agent_id = await repo.create(request.model_dump())
-        logger.info("api.agent.registered", agent_id=agent_id, name=request.name)
-        return {"agent_id": agent_id, "name": request.name, "status": "active"}
+        agent_id = await repo.create({**body.model_dump(), "owner_user_id": get_optional_user_id(request)})
+        logger.info("api.agent.registered", agent_id=agent_id, name=body.name)
+        return {"agent_id": agent_id, "name": body.name, "status": "active"}
     except Exception as exc:
         logger.error("api.agent.register_failed", error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to register agent")
 
 
 @router.get("/agents")
-async def list_agents():
-    agents = await repo.list_all()
+async def list_agents(request: Request):
+    query = {"status": "active"}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    agents = await get_db().agents.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     return {"agents": agents, "count": len(agents)}
 
 
 @router.get("/agents/{agent_id}")
-async def get_agent(agent_id: str):
-    agent = await repo.get_by_id(agent_id)
+async def get_agent(agent_id: str, request: Request):
+    query = {"agent_id": agent_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    agent = await get_db().agents.find_one(query, {"_id": 0})
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
     return agent
 
 
 @router.put("/agents/{agent_id}")
-async def update_agent(agent_id: str, updates: dict):
+async def update_agent(agent_id: str, updates: dict, request: Request):
+    query = {"agent_id": agent_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    existing = await get_db().agents.find_one(query, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
     updated = await repo.update(agent_id, updates)
     if not updated:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -65,22 +82,31 @@ async def update_agent(agent_id: str, updates: dict):
 
 
 @router.delete("/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_agent(agent_id: str):
-    success = await repo.deactivate(agent_id)
+async def deactivate_agent(agent_id: str, request: Request):
+    query = {"agent_id": agent_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    existing = await get_db().agents.find_one(query, {"_id": 0})
+    success = bool(existing) and await repo.deactivate(agent_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
 
 @router.post("/agents/{agent_id}/invoke")
-async def invoke_agent(agent_id: str, request: InvokeAgentRequest):
-    agent = await repo.get_by_id(agent_id)
+async def invoke_agent(agent_id: str, request: Request, body: InvokeAgentRequest):
+    query = {"agent_id": agent_id}
+    user_id = get_optional_user_id(request)
+    if user_id:
+        query["owner_user_id"] = user_id
+    agent = await get_db().agents.find_one(query, {"_id": 0})
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
     try:
         result = await invoke_agent_by_id(
             agent_config=agent,
-            input_data=request.input_data,
-            workflow_run_id=request.workflow_run_id,
+            input_data=body.input_data,
+            workflow_run_id=body.workflow_run_id,
             step_number=0,
         )
         return result
