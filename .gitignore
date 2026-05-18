@@ -1,16 +1,11 @@
 # Environment and credential files — NEVER commit secrets
 .env
-.env.*
 *.env
 credentials.json
 *.pem
 *.key
 .credentials
 
-# But always KEEP the example/sample env files
-!.env.example
-!*.env.example
-!*.env.sample
 
 # Python
 __pycache__/
@@ -71,8 +66,7 @@ test-results/
 -e 
 # Environment and credential files
 .env
-.env.*
-*.env
+.env
 credentials.json
 *.pem
 *.key
@@ -80,8 +74,6 @@ credentials.json
 -e 
 # Environment and credential files
 .env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key
@@ -89,8 +81,6 @@ credentials.json
 -e 
 # Environment and credential files
 .env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key

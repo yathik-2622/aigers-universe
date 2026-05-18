@@ -29,7 +29,7 @@ export default function Sidebar() {
     <aside
       data-testid="sidebar"
       data-collapsed={collapsed}
-      className={`shrink-0 border-r border-line bg-panel/70 backdrop-blur-md flex flex-col relative z-10 transition-[width] duration-200 ease-out ${
+      className={`h-screen shrink-0 border-r border-line bg-panel/70 backdrop-blur-md flex flex-col overflow-hidden relative z-10 transition-[width] duration-200 ease-out ${
         collapsed ? 'w-[68px]' : 'w-64'
       }`}
     >
@@ -50,7 +50,7 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className={`flex-1 ${collapsed ? 'px-2' : 'px-3'} space-y-0.5`}>
+      <nav className={`flex-1 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'} space-y-0.5`}>
         {NAV.map(({ to, label, icon: Icon, id }) => (
           <NavLink
             key={to}

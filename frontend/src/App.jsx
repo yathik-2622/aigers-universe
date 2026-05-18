@@ -15,11 +15,11 @@ import ObservabilityPage from './pages/ObservabilityPage.jsx'
 export default function App() {
   return (
     <TitleProvider>
-      <div className="min-h-screen flex bg-bg bg-noise text-ink relative">
+      <div className="h-screen overflow-hidden flex bg-bg bg-noise text-ink relative">
         <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0 relative">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
           <Header />
-          <main className="flex-1 overflow-auto bg-grid">
+          <main className="flex-1 min-h-0 overflow-y-auto bg-grid">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />

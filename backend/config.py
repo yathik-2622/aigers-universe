@@ -2,8 +2,12 @@
 Application settings loaded from environment variables via pydantic-settings.
 All configuration for AIger's Universe lives here — never import os.getenv() elsewhere.
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -17,6 +21,7 @@ class Settings(BaseSettings):
 
     # MongoDB — uses Emergent-protected env var names
     MONGO_URL: str = Field(default="mongodb://localhost:27017")
+    MONGO_URL_FALLBACK: str = Field(default="")
     DB_NAME: str = Field(default="aigers_universe")
 
     # Application
@@ -33,7 +38,7 @@ class Settings(BaseSettings):
     HITL_TIMEOUT_SECONDS: int = Field(default=300)
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
