@@ -5,7 +5,9 @@ Defines 5 generic, domain-agnostic platform tools available to all registered ag
 import json
 import uuid
 import datetime
+import re
 import structlog
+import httpx
 
 from fastmcp import FastMCP
 
@@ -40,6 +42,12 @@ async def semantic_search_impl(query: str, top_k: int = 5) -> dict:
     top_k = min(max(int(top_k), 1), 20)
     results = await search_similar(query=query, top_k=top_k)
     return {"results": results, "count": len(results)}
+
+
+async def knowledge_base_search_impl(query: str, top_k: int = 5) -> dict:
+    """Alias for semantic search positioned as a reusable knowledge-base tool."""
+    result = await semantic_search_impl(query=query, top_k=top_k)
+    return {"matches": result["results"], "count": result["count"], "source": "knowledge_base"}
 
 
 async def document_store_impl(action: str, collection: str, data: dict | None = None, query: dict | None = None, limit: int = 50) -> dict:
@@ -159,6 +167,46 @@ async def risk_scorer_impl(text: str, context: str = "") -> dict:
         raise ValueError("LLM returned malformed JSON from risk scorer") from exc
 
 
+async def wikipedia_search_impl(query: str, limit: int = 5) -> dict:
+    """Search Wikipedia for official-ish encyclopedia context."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "opensearch",
+                "search": query,
+                "limit": max(1, min(limit, 10)),
+                "namespace": 0,
+                "format": "json",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    titles = payload[1] if len(payload) > 1 else []
+    descriptions = payload[2] if len(payload) > 2 else []
+    links = payload[3] if len(payload) > 3 else []
+    results = []
+    for idx, title in enumerate(titles):
+        results.append({
+            "title": title,
+            "description": descriptions[idx] if idx < len(descriptions) else "",
+            "url": links[idx] if idx < len(links) else "",
+        })
+    return {"results": results, "count": len(results)}
+
+
+async def webpage_fetch_impl(url: str, max_chars: int = 5000) -> dict:
+    """Fetch a web page and return a cleaned text excerpt."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(url, headers={"User-Agent": "AIGERS-Universe/1.0"})
+        response.raise_for_status()
+        html = response.text
+    cleaned = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return {"url": url, "content": cleaned[:max(200, min(max_chars, 15000))], "content_length": len(cleaned)}
+
+
 async def trigger_hitl_impl(
     workflow_run_id: str,
     agent_name: str,
@@ -204,6 +252,12 @@ async def semantic_search(query: str, top_k: int = 5) -> dict:
 
 
 @mcp.tool
+async def knowledge_base_search(query: str, top_k: int = 5) -> dict:
+    """Search uploaded workspace documents as a reusable knowledge base."""
+    return await knowledge_base_search_impl(query=query, top_k=top_k)
+
+
+@mcp.tool
 async def document_store(action: str, collection: str, data: dict | None = None, query: dict | None = None, limit: int = 50) -> dict:
     """Generic MongoDB document store for agents (action='store' or 'retrieve')."""
     return await document_store_impl(action=action, collection=collection, data=data, query=query, limit=limit)
@@ -219,6 +273,18 @@ async def rules_engine_check(text: str, rule_category: str | None = None, policy
 async def risk_scorer(text: str, context: str = "") -> dict:
     """Score any text for risk level (RED/AMBER/GREEN) with rationale and key concerns."""
     return await risk_scorer_impl(text=text, context=context)
+
+
+@mcp.tool
+async def wikipedia_search(query: str, limit: int = 5) -> dict:
+    """Search Wikipedia for quick background and reference links."""
+    return await wikipedia_search_impl(query=query, limit=limit)
+
+
+@mcp.tool
+async def webpage_fetch(url: str, max_chars: int = 5000) -> dict:
+    """Fetch and clean a web page into plain text for downstream reasoning."""
+    return await webpage_fetch_impl(url=url, max_chars=max_chars)
 
 
 @mcp.tool
@@ -242,9 +308,24 @@ async def trigger_hitl(workflow_run_id: str, agent_name: str, reason: str, sever
 # Registry used by the workflow engine to invoke tools in-process by name
 TOOL_REGISTRY = {
     "semantic_search": semantic_search_impl,
+    "knowledge_base_search": knowledge_base_search_impl,
     "document_store": document_store_impl,
     "rules_engine_check": rules_engine_check_impl,
     "policy_library_search": policy_library_search_impl,
     "risk_scorer": risk_scorer_impl,
+    "wikipedia_search": wikipedia_search_impl,
+    "webpage_fetch": webpage_fetch_impl,
     "trigger_hitl": trigger_hitl_impl,
+}
+
+TOOL_METADATA = {
+    "semantic_search": {"description": "Search indexed uploaded documents using vector similarity.", "category": "knowledge"},
+    "knowledge_base_search": {"description": "Search your uploaded workspace knowledge base with semantic retrieval.", "category": "knowledge"},
+    "document_store": {"description": "Store and retrieve structured agent-side data in Mongo.", "category": "memory"},
+    "rules_engine_check": {"description": "Check text against governance rules and produce PASS/FAIL/REVIEW results.", "category": "governance"},
+    "policy_library_search": {"description": "Search uploaded governance and policy material.", "category": "governance"},
+    "risk_scorer": {"description": "Score text for business and compliance risk.", "category": "analysis"},
+    "wikipedia_search": {"description": "Search Wikipedia for background context and reference links.", "category": "web"},
+    "webpage_fetch": {"description": "Fetch a webpage and return cleaned text content.", "category": "web"},
+    "trigger_hitl": {"description": "Pause a workflow for human approval.", "category": "control"},
 }

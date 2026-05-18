@@ -17,6 +17,10 @@ class LoginRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=200)
 
 
+def _public_user(user: dict) -> dict:
+    return {k: v for k, v in user.items() if k != "_id"}
+
+
 def _resolve_role(email: str, existing_role: str | None = None) -> str:
     if existing_role:
         return existing_role
@@ -47,6 +51,7 @@ async def login(body: LoginRequest):
             "last_login_at": now,
         }
         await db.users.insert_one(user)
+    user = _public_user(user)
     token = create_access_token(user)
     return {"user": user, "access_token": token, "token_type": "bearer"}
 

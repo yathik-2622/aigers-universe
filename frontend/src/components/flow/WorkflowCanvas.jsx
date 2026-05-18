@@ -15,6 +15,7 @@ export default function WorkflowCanvas({
   readOnly = false,
 }) {
   const wrapper = useRef(null)
+  const reactFlowRef = useRef(null)
   const [nodes, setNodes] = useState(initialNodes)
   const [edges, setEdges] = useState(initialEdges)
   const [selected, setSelected] = useState(null)
@@ -40,7 +41,11 @@ export default function WorkflowCanvas({
     if (!data) return
     const agent = JSON.parse(data)
     const bounds = wrapper.current.getBoundingClientRect()
-    const position = { x: event.clientX - bounds.left - 100, y: event.clientY - bounds.top - 40 }
+    const screenPosition = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    const flowPosition = reactFlowRef.current?.screenToFlowPosition
+      ? reactFlowRef.current.screenToFlowPosition(screenPosition)
+      : screenPosition
+    const position = { x: flowPosition.x - 115, y: flowPosition.y - 45 }
     const id = `agent_${agent.agent_id}_${Date.now()}`
     setNodes(ns => [...ns, {
       id,
@@ -92,6 +97,7 @@ export default function WorkflowCanvas({
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         fitView
+        onInit={(instance) => { reactFlowRef.current = instance }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}

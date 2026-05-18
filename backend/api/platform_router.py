@@ -137,8 +137,9 @@ async def invoke_agent(agent_id: str, request: Request, body: InvokeAgentRequest
 @router.get("/tools")
 async def list_available_tools():
     """List all MCP tool names available on the platform."""
-    from mcp_tools.tool_server import TOOL_REGISTRY
-    return {"tools": list(TOOL_REGISTRY.keys())}
+    from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
+    tools = [{"name": name, **TOOL_METADATA.get(name, {})} for name in TOOL_REGISTRY.keys()]
+    return {"tools": [tool["name"] for tool in tools], "items": tools}
 
 
 @router.get("/models")

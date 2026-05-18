@@ -34,6 +34,21 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "knowledge_base_search": {
+        "type": "function",
+        "function": {
+            "name": "knowledge_base_search",
+            "description": "Search uploaded workspace documents as a reusable knowledge base.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "top_k": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
     "document_store": {
         "type": "function",
         "function": {
@@ -80,6 +95,36 @@ TOOL_SCHEMAS: dict[str, dict] = {
                     "context": {"type": "string"},
                 },
                 "required": ["text"],
+            },
+        },
+    },
+    "wikipedia_search": {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_search",
+            "description": "Search Wikipedia for background context and reference links.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "webpage_fetch": {
+        "type": "function",
+        "function": {
+            "name": "webpage_fetch",
+            "description": "Fetch a web page and return cleaned text content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "max_chars": {"type": "integer", "default": 5000},
+                },
+                "required": ["url"],
             },
         },
     },

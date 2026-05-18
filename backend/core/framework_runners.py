@@ -15,6 +15,17 @@ from mcp_tools.tool_server import TOOL_REGISTRY
 logger = structlog.get_logger(__name__)
 
 
+def _safe_message_name(value: str) -> str:
+    allowed = []
+    for ch in value.lower():
+        if ch.isalnum() or ch in {"_", "-"}:
+            allowed.append(ch)
+        else:
+            allowed.append("_")
+    safe = "".join(allowed).strip("_") or "agent"
+    return safe[:64]
+
+
 def _make_crewai_tool(base_tool, tool):
     name = base_tool.name
     description = base_tool.description or name
@@ -214,7 +225,7 @@ async def _run_langgraph(
 ) -> dict:
     llm = _make_langchain_llm(model_name)
     tools = _build_langchain_tools(enabled_tools, workflow_run_id, agent_name, selected_policy_ids)
-    runner = create_react_agent(model=llm, tools=tools, prompt=system_prompt or None, name=agent_name)
+    runner = create_react_agent(model=llm, tools=tools, prompt=system_prompt or None, name=_safe_message_name(agent_name))
     result = await runner.ainvoke({"messages": [HumanMessage(content=user_message)]})
     messages = result.get("messages", [])
     total_tokens, prompt_tokens, completion_tokens = _extract_usage_from_messages(messages)
@@ -238,7 +249,7 @@ async def _run_langchain(
 ) -> dict:
     llm = _make_langchain_llm(model_name)
     tools = _build_langchain_tools(enabled_tools, workflow_run_id, agent_name, selected_policy_ids)
-    runner = create_agent(model=llm, tools=tools, system_prompt=system_prompt or None, name=agent_name)
+    runner = create_agent(model=llm, tools=tools, system_prompt=system_prompt or None, name=_safe_message_name(agent_name))
     result = await runner.ainvoke({"messages": [{"role": "user", "content": user_message}]})
     messages = result.get("messages", [])
     total_tokens, prompt_tokens, completion_tokens = _extract_usage_from_messages(messages)
