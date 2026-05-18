@@ -8,14 +8,14 @@ const TITLES = {
   '/marketplace': { title: 'Agent Marketplace', subtitle: 'Install review agents and compose your workflow stack.' },
   '/agents': { title: 'Registered Agents', subtitle: 'Configure system prompts, tools, and HITL gates.' },
   '/builder': { title: 'Workflow Builder', subtitle: 'Attach policies, upload documents, save, and run.' },
-  '/tools-chat': { title: 'Tool Playground', subtitle: 'Interact with MCP tools through a chat-style playground.' },
+  '/tools-chat': { title: 'MCP Studio', subtitle: 'Manage KB inputs and interact with MCP tools through a chat-style workspace.' },
   '/runs': { title: 'Workflow Run', subtitle: 'Live execution, resumable steps, and readable reports.' },
   '/hitl': { title: 'Human-in-the-Loop', subtitle: 'Review and approve paused workflows.' },
   '/observability': { title: 'Observability', subtitle: 'Traces, tokens, latency, and cost across all runs.' },
   '/admin': { title: 'Admin Control Tower', subtitle: 'Global visibility across users, projects, and workflow operations.' },
 }
 
-const HIDDEN_ROUTES = new Set(['/dashboard', '/projects', '/marketplace', '/agents', '/hitl', '/admin'])
+const HIDDEN_ROUTES = new Set(['/dashboard', '/projects', '/marketplace', '/agents', '/hitl', '/admin', '/runs'])
 
 export default function Header() {
   const loc = useLocation()

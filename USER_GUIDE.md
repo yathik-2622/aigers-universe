@@ -13,7 +13,7 @@ A generic, domain-agnostic platform that lets you:
 - **Register** any AI agent (LangGraph / CrewAI / LangChain / Agno) with a name, framework, system prompt, and tool allow-list.
 - **Compose** multi-agent workflows visually on a **ReactFlow drag-and-drop canvas**.
 - **Connect** agents to platform tools via **MCP** (Model Context Protocol).
-- **Communicate** between agents via **A2A** — every message is persisted as an audit trail.
+- **Communicate** between agents via **A2A** — every message is persisted as an audit trail, and agents can now expose HTTP agent cards and remote invoke endpoints for federated interoperability.
 - **Gate** execution with **HITL** approvals (LangGraph `interrupt()` + `InMemorySaver`).
 - **Observe** every run live: token usage, latency, cost, traces, A2A timeline.
 
@@ -23,7 +23,7 @@ A generic, domain-agnostic platform that lets you:
 
 ## Table of contents
 1. [Core concepts in 60 seconds](#core-concepts-in-60-seconds)
-2. [The five built-in MCP tools](#the-five-built-in-mcp-tools)
+2. [MCP tools you can use today](#mcp-tools-you-can-use-today)
 3. [Live URLs in this environment](#live-urls-in-this-environment)
 4. [10-minute first run — illustrated](#10-minute-first-run--illustrated)
 5. [Page-by-page reference](#page-by-page-reference)
@@ -51,14 +51,28 @@ A generic, domain-agnostic platform that lets you:
 
 ---
 
-## The five built-in MCP tools
+## MCP tools you can use today
 
 | Tool | What it does | Typical use |
 |---|---|---|
 | `semantic_search` | FAISS similarity over uploaded documents | "Find clauses about indemnity in the uploaded contract" |
+| `knowledge_base_search` | Semantic retrieval over uploaded KB files and imported repo context | "Find current deployment constraints in my modernization KB" |
 | `document_store` | CRUD on agent-owned MongoDB collections (`agent_data_*`) | Persist intermediate findings across agents |
 | `rules_engine_check` | Runs text against seeded governance rules via LLM | PII / compliance / export-control sweeps |
+| `policy_library_search` | Searches uploaded governance and policy material | "Find masking rules for customer identifiers" |
 | `risk_scorer` | LLM scores 0–10 + RED/AMBER/GREEN with concerns | Risk triage on contract clauses, transactions |
+| `wikipedia_search` | Fast public background research | "Summarise the strangler pattern" |
+| `webpage_fetch` | Cleans official docs and public pages into text | "Fetch this vendor migration guide" |
+| `weather_current` | Live weather via Open-Meteo, no key required | "Get current weather for Bangalore" |
+| `openweather_current` | Live weather via OpenWeather | "Get rich weather details for New York" |
+| `serpapi_search` | Live search-engine results via SerpAPI | "Find official Azure modernization docs" |
+| `official_docs_search` | Live search across official Java, Python, Spring, and .NET docs | "Find official Spring Boot migration guidance" |
+| `java_docs_search` | Oracle Java docs adapter | "Find Java concurrency migration notes" |
+| `python_docs_search` | Python docs adapter | "Find `asyncio` task-group guidance" |
+| `spring_docs_search` | Spring docs adapter | "Find Spring Boot externalized config docs" |
+| `dotnet_docs_search` | .NET docs adapter | "Find ASP.NET dependency injection migration docs" |
+| `remote_agent_discover` | Fetches a remote A2A agent card | "Inspect this remote modernization agent" |
+| `remote_agent_dispatch` | Sends work to a remote A2A agent over HTTP | "Delegate repo classification to a remote agent" |
 | `trigger_hitl` | Pauses workflow and creates an approval card | Compliance violations, dollar thresholds |
 
 > Tools are LLM-driven. The model decides if and when to invoke them based on the agent's system prompt. Mention the tool by name in the prompt to nudge the model.
@@ -99,7 +113,7 @@ Click **Marketplace** in the sidebar.
 
 ![Marketplace](./docs/screenshots/02-marketplace.jpeg)
 
-You get 5 generic templates ready to install:
+You get a structured marketplace of 30+ installable templates across review, modernization, research, documentation, quality, governance, and migration use cases. The core starter set includes:
 - **Document Classifier** — classifies content into categories.
 - **Data Extractor** — pulls entities, dates, amounts, clauses.
 - **Risk Analyzer** — scores content RED/AMBER/GREEN.
@@ -107,6 +121,13 @@ You get 5 generic templates ready to install:
 - **Recommendation Advisor** — synthesises into priorities.
 
 Click **Install** on a template. Install is **idempotent for default installs** — clicking twice returns the same agent (no duplicates). If you want a variant, install via the API with `custom_name`.
+
+New migration-focused templates include framework-native CrewAI and Agno agents such as:
+- **Java to Spring Boot Architect** (CrewAI)
+- **Java to Python Service Translator** (Agno)
+- **Streamlit to Next.js Experience Migrator** (Agno)
+- **React to Next.js Upgrade Planner** (CrewAI)
+- **.NET to Python API Migrator** (CrewAI)
 
 ---
 
@@ -131,7 +152,7 @@ Click **Workflow Builder** in the sidebar.
 ![Builder — empty canvas](./docs/screenshots/04-builder-empty.jpeg)
 
 The page has 3 zones:
-- **Left rail** — your agent library (scrollable) + Document upload zone.
+- **Left rail** — your agent library (scrollable) + Workflow Inputs + Knowledge Base zones.
 - **Center canvas** — ReactFlow drag-drop area with grid background, minimap, zoom controls.
 - **Top bar** — workflow name input · **Save** · **Run workflow**.
 
@@ -143,10 +164,10 @@ The page has 3 zones:
 5. Click any node to open the right-side **Config Panel** for that agent — edit prompt / tools / HITL toggle, click **Save changes**.
 6. Order matters — agents execute left → right by `position.x` on the canvas.
 
-**To upload a document for the workflow**:
-- Click **Upload PDF / DOCX / TXT** in the left rail.
-- The file is text-extracted, chunked at 1000 chars (200-char overlap), embedded via `text-embedding-3-small`, and stored in FAISS.
-- The new file appears below the upload button — click to select it as the workflow input.
+**Workflow inputs vs knowledge base**:
+- **Workflow Inputs** are run-scoped. Add free text, upload files, or import a GitHub repo snapshot. These are stored in MongoDB and passed into the run without being indexed into the reusable KB.
+- **Knowledge Base** content is reusable. KB uploads/imports are indexed and later searchable through `knowledge_base_search`.
+- Each node can now choose which inputs it sees: text, uploaded files, workflow repo import, KB context, and upstream outputs.
 
 When ready, give the workflow a name in the top input → **Save** → **Run workflow**.
 
@@ -222,26 +243,33 @@ Click **Observability** in the sidebar.
 - Recent runs feed + pending HITL queue.
 
 ### Marketplace
-- 5 generic templates, search bar filters by name/description.
+- 30+ structured templates, search bar filters by name/description.
 - Idempotent install — same agent_id returned on repeat clicks unless you pass `custom_name` / `custom_system_prompt`.
 
 ### Agents
 - Lists all active agents (deactivated ones hidden).
-- **New agent** modal for fully custom registration.
+- **New agent** modal for fully custom registration, including tags, A2A enablement, A2A mode (`local` or `remote`), and an optional remote agent card URL.
+- The page now includes a **Local agent cards** section so operators can copy a local card URL with one click and paste it into a remote-routed agent setup.
+- When `A2A mode` is `Remote`, the form and node config both include a **Test remote card** action so you can validate the target card before saving.
 - Soft-delete via trash icon.
 
 ### Workflow Builder
 - ReactFlow canvas with custom `AgentNode` (framework, HITL, tool count badges).
-- Right-side **Config Panel** opens on node click.
-- Left rail: agent library + document upload + recent document picker.
+- Right-side **Config Panel** opens on node click and now includes per-node workflow input bindings plus A2A routing controls.
+- Left rail: agent library + workflow inputs + KB controls + recent document picker.
+- The new **Orchestrator AI** panel can read a user goal, select installed agents, suggest missing Marketplace agents, optionally install them, and lay out the workflow automatically.
+- Planner details now appear in a dedicated modal summary, while the canvas itself animates the workflow build so the creation process feels visible instead of instant.
+- The planner modal now supports `Accept`, `Edit`, `Replan`, and `Reject`. Accepting closes the modal and then slow-builds the workflow on canvas.
+- Workflow input file uploads and GitHub imports now use separate action states, so only the active action shows loading feedback.
 - Top bar: workflow name · Save · Run workflow.
 
 ### Workflow Run
 - Live ReactFlow pipeline.
 - SSE-driven with polling fallback.
-- A2A message log on the right.
+- A2A message log on the right with expandable message cards.
 - HITL banner on pause.
-- View report modal on completion.
+- View report modal on completion, with a preparation state if the final report is still being assembled.
+- The active node is camera-focused during build-time and run-time progression so users can follow the current step visually.
 
 ### HITL Approvals
 - **Pending** cards (amber) with Approve / Reject.
@@ -271,6 +299,7 @@ The platform auto-parses your JSON output. If it can't, it stores raw text in `o
 ### A2A discipline
 - The platform automatically sends a `result` message from each agent to the next — you don't need to call `send_a2a_message` from your prompts.
 - Want richer signalling? Ask your agent to emit a structured `alert` payload — the next agent will see it in its `UPSTREAM AGENT MESSAGES` block.
+- For remote interoperability, each active agent can expose an A2A agent card at `/api/a2a/agents/{agent_id}/card` and a remote invoke endpoint at `/api/a2a/agents/{agent_id}/invoke`.
 
 ### Cost control
 - Use a small classifier early to short-circuit cheap.
@@ -382,6 +411,7 @@ Click the run id to jump back into the live run page.
 | POST   | /platform/agents/{id}/invoke           | Invoke agent directly |
 | GET    | /platform/tools                        | List MCP tool names |
 | POST   | /workflows                             | Create workflow definition |
+| POST   | /workflows/auto-build                  | Auto-compose a workflow from installed agents + Marketplace |
 | GET    | /workflows                             | List workflows |
 | GET    | /workflows/{id}                        | Get definition + canvas |
 | POST   | /workflows/{id}/run                    | Start a run (async) |
@@ -397,9 +427,16 @@ Click the run id to jump back into the live run page.
 | GET    | /observability/traces                  | Recent traces |
 | GET    | /observability/traces/{run_id}/full    | Full per-run traces |
 | POST   | /documents/upload                      | Upload PDF/DOCX/TXT |
+| POST   | /documents/workflow-input/upload       | Upload run-scoped workflow input file |
+| POST   | /documents/workflow-input/import-github| Import run-scoped GitHub repo snapshot |
+| POST   | /documents/workflow-input/cleanup      | Cleanup expired workflow inputs |
 | GET    | /documents                             | List documents |
 | GET    | /marketplace/templates                 | List templates |
 | POST   | /marketplace/templates/{id}/install    | **Idempotent** install |
+| GET    | /a2a/agents/cards                      | List local A2A agent cards |
+| GET    | /a2a/agents/{agent_id}/card            | Get one local A2A agent card |
+| POST   | /a2a/agents/{agent_id}/invoke          | Remotely invoke a local agent |
+| POST   | /a2a/validate-card                     | Validate a remote A2A card URL before saving |
 | —      | /mcp                                   | MCP SSE endpoint (FastApiMCP) |
 
 ---
@@ -432,16 +469,174 @@ Click the run id to jump back into the live run page.
 - Project owners can edit member emails from the Projects page, and invited users gain shared access to project workflows and runs.
 - Admin users can delete projects from the Admin View when cleanup is required; workflows and runs are detached instead of destroyed.
 - Dashboard and Builder now let users open uploaded documents in a rich preview modal so extracted content can be reviewed without leaving the platform.
+- Knowledge-base ingestion now supports category-tagged uploads and GitHub repository import for repo-context and modernization workflows.
 
 ## Tool Playground And Policy Uploads
 
-- `/tools-chat` is a chat-style playground for MCP tools, inspired by Langflow's Playground concept.
-- You can let the backend auto-select a tool or force a specific safe tool such as `policy_library_search`, `rules_engine_check`, or `risk_scorer`.
-- In Workflow Builder, policy documents can be uploaded directly. Uploaded policy text is stored in Mongo and can be queried through `policy_library_search`.
-- If an agent should use policy text directly, enable the `policy_library_search` tool on that agent in Agents or the node config panel.
+- `/tools-chat` is the dedicated MCP Studio for KB uploads, category-based knowledge history, GitHub import, tool testing, and operator prompts.
+- You can let the backend auto-select a tool or force a specific safe tool such as `policy_library_search`, `rules_engine_check`, `risk_scorer`, `serpapi_search`, or `webpage_fetch`.
+- KB uploads belong in MCP Studio or the KB section of the builder. Workflow Inputs are separate and are meant for run-specific payloads.
+- If an agent should use policy or repo context directly, enable `knowledge_base_search`, `policy_library_search`, `webpage_fetch`, or `serpapi_search` on that agent from Agents or the node config panel.
 - Each tool card now explains when to use the tool, what input to provide, what output to expect, and offers example prompts for operators.
 - The Agents page can export each registered agent as LangGraph, LangChain, CrewAI, Agno, or Langflow-style code/JSON for review and download.
 - The chat pane in Tool Playground stays fixed while the tool guide column scrolls, and the chat composer can upload documents for search-oriented tool workflows.
+- Tool Playground also tracks user-level KB upload history and can import public GitHub repositories into the searchable knowledge base. Public repos work without `GITHUB_TOKEN`; private repos and higher rate limits need it.
+
+## Environment Guidance
+
+- `GITHUB_TOKEN`
+  Keep blank if you only need light public-repo import usage.
+  Use a fine-grained GitHub personal access token if you want private repo import or more resilient public-repo rate limits.
+  Create it from GitHub: `Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens`.
+  Recommended permissions: repository `Contents: Read-only`, `Metadata: Read-only`.
+
+- `A2A_SHARED_SECRET`
+  Use any long random string, for example `change-this-local-a2a-secret`.
+  Keep the same value across backends that should trust each other for remote A2A invoke.
+
+- `A2A_PUBLIC_BASE_URL`
+  Local: `http://localhost:8001`
+  Deployment: your public backend origin, for example `https://your-domain.com`
+  This value is used when the backend generates agent card URLs.
+
+- `OFFICIAL_DOCS_MAX_RESULTS`
+  Recommended: `5`
+  Increase only if you want broader docs recall at the cost of more fetched references.
+
+- `WORKFLOW_INPUT_RETENTION_DAYS`
+  Recommended: `7`
+  Use a shorter value if workflow uploads should expire faster.
+
+- `WORKFLOW_INPUT_MAX_FILES`
+  Recommended: `6`
+  Good balance for migration workflows that need a few source files plus a repo snapshot.
+
+- `WORKFLOW_INPUT_MAX_TOTAL_BYTES`
+  Recommended: `52428800`
+  This is 50 MB total workflow uploads per run.
+
+- `WORKFLOW_INPUT_MAX_TEXT_CHARS`
+  Recommended: `120000`
+  Good default for large migration prompts without letting runs become uncontrolled.
+
+## Exact Test Flow
+
+1. Set backend env values.
+   Keep `GITHUB_TOKEN` blank if you only test public repo import.
+   Set `A2A_SHARED_SECRET=change-this-local-a2a-secret`.
+   Set `A2A_PUBLIC_BASE_URL=http://localhost:8001`.
+   Keep the other new values at their documented defaults.
+
+2. Start services.
+   Backend: `uvicorn server:app --reload --host 0.0.0.0 --port 8001`
+   Frontend: `yarn start`
+
+3. Verify the backend.
+   Open `GET /api/health`
+   Open `GET /api/a2a/agents/cards`
+
+4. Install migration templates.
+   From Marketplace, install:
+   `Java to Spring Boot Architect`
+   `Java to Python Service Translator`
+   `Streamlit to Next.js Experience Migrator`
+
+5. Create a custom remote agent from Agents.
+   Open `Agents -> New agent`
+   In the `Local agent cards` panel, copy a card URL from an existing local agent
+   Choose any framework
+   Turn `A2A enabled` on
+   Set `A2A mode` to `Remote`
+   Paste the copied card URL like `http://localhost:8001/api/a2a/agents/<some-local-agent-id>/card`
+   Register it
+
+6. Build a workflow.
+   Add two nodes.
+   On node 1, keep all workflow input bindings enabled.
+   On node 2, disable `Knowledge base context` and `Uploaded files`.
+   Optionally switch node 2 to `Remote A2A agent route` in the node config panel.
+
+7. Add workflow inputs.
+   Enter a migration prompt in the text box.
+   Upload one file.
+   Import one public GitHub repo.
+   Optionally add KB uploads separately.
+
+8. Run the workflow.
+   Confirm the run page shows node statuses.
+   Confirm the A2A log is populated.
+   If a node is remote-routed, confirm it still completes and the tool list shows remote dispatch behavior in traces.
+
+9. Test official docs tools.
+   In MCP Studio, run:
+   `java_docs_search` with `ExecutorService shutdown`
+   `spring_docs_search` with `configuration properties`
+   `python_docs_search` with `asyncio task groups`
+   `dotnet_docs_search` with `dependency injection`
+
+10. Test cleanup.
+   Call `POST /api/documents/workflow-input/cleanup`
+   Confirm the response shows deleted count and retention days.
+
+## UI-Only Scenario Tests
+
+### Scenario 1: Modernization orchestration
+
+1. Open `Marketplace` and make sure at least some modernization agents are installed. If not, the builder can install them for you.
+2. Open `Workflow Builder`.
+3. In the `Orchestrator AI` panel, paste:
+   `Modernize this Java monolith into Spring Boot services, assess migration risk, and produce a phased remediation backlog.`
+4. Click `Auto-build workflow`.
+5. If the panel shows missing agents, click `Install required agents and build workflow`.
+6. Confirm the canvas auto-populates with a real multi-agent pipeline.
+7. In `Workflow Inputs`, add:
+   text describing the target runtime and timeline
+   one uploaded file such as a Java class, architecture note, or migration checklist
+   one public GitHub repo import if available
+8. Optionally add KB context in the `Knowledge base` section for reusable architecture docs.
+9. Click a node and verify the input bindings match the workflow goal.
+10. Run the workflow.
+11. On the run page, verify:
+   the A2A log is populated
+   modernization agents execute in order
+   the final report includes migration phases, risk, and remediation guidance
+
+### Scenario 2: Contract risk workflow
+
+1. Open `Workflow Builder`.
+2. In the `Orchestrator AI` panel, paste:
+   `Review this vendor contract for key extraction, operational risk, compliance issues, and a final approval recommendation.`
+3. Click `Auto-build workflow`.
+4. Confirm the planner assembles a contract-oriented flow using extraction, risk, compliance, and recommendation agents.
+5. Upload a contract PDF, DOCX, or text file in either the workflow input section or KB section depending on whether it is run-specific or reusable.
+6. Run the workflow.
+7. On the run page, verify:
+   the extractor output appears upstream
+   the risk analysis is present
+   compliance can trigger HITL if a high-severity issue is found
+   the final recommendation consolidates the earlier findings
+
+### Scenario 3: Remote A2A routing from UI only
+
+1. Open `Agents`.
+2. In `Local agent cards`, copy a card URL for any local agent.
+3. Click `New agent`.
+4. Enable A2A, choose `Remote`, paste the copied URL, and click `Test remote card`.
+5. Confirm the validation summary appears before saving.
+6. Save the remote-routed agent.
+7. Open `Workflow Builder` and drag that agent onto the canvas.
+8. Run a workflow containing that node and confirm the run still completes while the A2A log shows remote delegation activity.
+
+### Scenario 4: Project-scoped orchestration
+
+1. Open `Projects` and create a new project such as `Modernization Wave 1`.
+2. Add one or more member emails if you want to validate shared project visibility.
+3. Open `Workflow Builder`.
+4. In the `Project scope` dropdown, select the new project.
+5. Build a workflow manually or through `Orchestrator AI`.
+6. Save the workflow.
+7. Confirm that reopening the builder or run pages keeps the workflow associated with that project.
+8. Open `Observability` and `Projects` to verify the run appears under the same project context.
 - **MCP** — Model Context Protocol. Open spec for exposing tools to LLM agents. We use `fastmcp` + `fastapi-mcp`.
 - **A2A** — Agent-to-Agent. Google's open spec for inter-agent messaging. We use `python-a2a` for descriptors + Mongo for the message bus.
 - **LangGraph** — Stateful graph orchestration over LangChain. We use it for the workflow chain + `interrupt()`/`Command` HITL resume.

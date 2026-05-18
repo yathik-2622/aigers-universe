@@ -8,9 +8,12 @@ import datetime
 import re
 import structlog
 import httpx
+from urllib.parse import quote_plus, unquote, urlparse
 
 from fastmcp import FastMCP
 
+from a2a.agent_communication import dispatch_remote_agent, fetch_remote_agent_card
+from config import settings
 from db.mongo_client import get_db
 from vectorstore.faiss_store import search_similar, add_document  # noqa: F401  (add_document used elsewhere)
 from core.llm_router import chat_completion
@@ -20,6 +23,13 @@ logger = structlog.get_logger(__name__)
 mcp = FastMCP(
     name="AIger's Universe Tool Server",
 )
+
+OFFICIAL_DOCS_PROVIDERS = {
+    "java": {"label": "Oracle Java", "domains": ["docs.oracle.com"]},
+    "python": {"label": "Python", "domains": ["docs.python.org"]},
+    "spring": {"label": "Spring", "domains": ["docs.spring.io", "spring.io"]},
+    "dotnet": {"label": ".NET", "domains": ["learn.microsoft.com"]},
+}
 
 
 def register_all_tools() -> None:
@@ -195,6 +205,75 @@ async def wikipedia_search_impl(query: str, limit: int = 5) -> dict:
     return {"results": results, "count": len(results)}
 
 
+async def weather_current_impl(latitude: float, longitude: float, timezone: str = "auto") -> dict:
+    """Fetch current weather from Open-Meteo without an API key."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": ["temperature_2m", "relative_humidity_2m", "precipitation", "wind_speed_10m", "weather_code"],
+                "timezone": timezone,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return {
+        "latitude": payload.get("latitude"),
+        "longitude": payload.get("longitude"),
+        "timezone": payload.get("timezone"),
+        "current": payload.get("current", {}),
+        "units": payload.get("current_units", {}),
+    }
+
+
+async def openweather_current_impl(latitude: float, longitude: float, units: str = "metric") -> dict:
+    """Fetch current weather from OpenWeather using API key."""
+    if not settings.OPENWEATHER_API_KEY.strip():
+        raise ValueError("OPENWEATHER_API_KEY is not configured")
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={
+                "lat": latitude,
+                "lon": longitude,
+                "appid": settings.OPENWEATHER_API_KEY,
+                "units": units,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return payload
+
+
+async def serpapi_search_impl(query: str, num: int = 5, location: str | None = None) -> dict:
+    """Fetch live Google-style search results through SerpAPI."""
+    if not settings.SERPAPI_KEY.strip():
+        raise ValueError("SERPAPI_KEY is not configured")
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": settings.SERPAPI_KEY,
+        "num": max(1, min(num, 10)),
+    }
+    if location:
+        params["location"] = location
+    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+        response = await client.get("https://serpapi.com/search.json", params=params)
+        response.raise_for_status()
+        payload = response.json()
+    results = []
+    for item in payload.get("organic_results", [])[: max(1, min(num, 10))]:
+        results.append({
+            "title": item.get("title", ""),
+            "link": item.get("link", ""),
+            "snippet": item.get("snippet", ""),
+            "source": item.get("source", ""),
+        })
+    return {"results": results, "count": len(results), "search_information": payload.get("search_information", {})}
+
+
 async def webpage_fetch_impl(url: str, max_chars: int = 5000) -> dict:
     """Fetch a web page and return a cleaned text excerpt."""
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -205,6 +284,93 @@ async def webpage_fetch_impl(url: str, max_chars: int = 5000) -> dict:
     cleaned = re.sub(r"<[^>]+>", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return {"url": url, "content": cleaned[:max(200, min(max_chars, 15000))], "content_length": len(cleaned)}
+
+
+def _decode_duckduckgo_href(href: str) -> str:
+    match = re.search(r"uddg=([^&]+)", href)
+    return unquote(match.group(1)) if match else href
+
+
+async def official_docs_search_impl(provider: str, query: str, max_results: int = 5, fetch_excerpts: bool = True) -> dict:
+    provider_key = (provider or "").strip().lower()
+    if provider_key not in OFFICIAL_DOCS_PROVIDERS:
+        raise ValueError(f"Unsupported provider '{provider}'. Must be one of {sorted(OFFICIAL_DOCS_PROVIDERS)}")
+    config = OFFICIAL_DOCS_PROVIDERS[provider_key]
+    max_results = max(1, min(max_results, settings.OFFICIAL_DOCS_MAX_RESULTS))
+    search_query = " OR ".join([f"site:{domain}" for domain in config["domains"]]) + f" {query}"
+    search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(search_query)}"
+
+    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+        response = await client.get(search_url, headers={"User-Agent": "AIGERS-Universe/1.0"})
+        response.raise_for_status()
+        html = response.text
+
+    matches = re.findall(
+        r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    results = []
+    for href, raw_title, raw_snippet in matches:
+        url = _decode_duckduckgo_href(href)
+        host = urlparse(url).netloc.lower()
+        if not any(domain in host for domain in config["domains"]):
+            continue
+        title = re.sub(r"<[^>]+>", "", raw_title).strip()
+        snippet = re.sub(r"<[^>]+>", "", raw_snippet)
+        item = {
+            "title": title,
+            "url": url,
+            "snippet": re.sub(r"\s+", " ", snippet).strip(),
+            "provider": provider_key,
+        }
+        if fetch_excerpts:
+            try:
+                fetched = await webpage_fetch_impl(url=url, max_chars=1800)
+                item["excerpt"] = fetched.get("content", "")
+            except Exception as exc:
+                logger.warning("tool.official_docs_fetch_excerpt_failed", provider=provider_key, url=url, error=str(exc))
+        results.append(item)
+        if len(results) >= max_results:
+            break
+
+    return {"provider": provider_key, "provider_label": config["label"], "query": query, "results": results, "count": len(results)}
+
+
+async def java_docs_search_impl(query: str, max_results: int = 5) -> dict:
+    return await official_docs_search_impl(provider="java", query=query, max_results=max_results)
+
+
+async def python_docs_search_impl(query: str, max_results: int = 5) -> dict:
+    return await official_docs_search_impl(provider="python", query=query, max_results=max_results)
+
+
+async def spring_docs_search_impl(query: str, max_results: int = 5) -> dict:
+    return await official_docs_search_impl(provider="spring", query=query, max_results=max_results)
+
+
+async def dotnet_docs_search_impl(query: str, max_results: int = 5) -> dict:
+    return await official_docs_search_impl(provider="dotnet", query=query, max_results=max_results)
+
+
+async def remote_agent_discover_impl(agent_card_url: str) -> dict:
+    return {"agent_card_url": agent_card_url, "card": await fetch_remote_agent_card(agent_card_url)}
+
+
+async def remote_agent_dispatch_impl(
+    agent_card_url: str,
+    input_data: dict,
+    workflow_run_id: str,
+    from_agent: str,
+    message_type: str = "delegation",
+) -> dict:
+    return await dispatch_remote_agent(
+        agent_card_url=agent_card_url,
+        input_data=input_data,
+        workflow_run_id=workflow_run_id,
+        from_agent=from_agent,
+        message_type=message_type,
+    )
 
 
 async def trigger_hitl_impl(
@@ -288,9 +454,75 @@ async def webpage_fetch(url: str, max_chars: int = 5000) -> dict:
 
 
 @mcp.tool
+async def weather_current(latitude: float, longitude: float, timezone: str = "auto") -> dict:
+    """Fetch current weather from Open-Meteo."""
+    return await weather_current_impl(latitude=latitude, longitude=longitude, timezone=timezone)
+
+
+@mcp.tool
+async def openweather_current(latitude: float, longitude: float, units: str = "metric") -> dict:
+    """Fetch current weather from OpenWeather using API key."""
+    return await openweather_current_impl(latitude=latitude, longitude=longitude, units=units)
+
+
+@mcp.tool
+async def serpapi_search(query: str, num: int = 5, location: str | None = None) -> dict:
+    """Fetch live search results using SerpAPI."""
+    return await serpapi_search_impl(query=query, num=num, location=location)
+
+
+@mcp.tool
 async def policy_library_search(query: str, policy_ids: list[str] | None = None, limit: int = 5) -> dict:
     """Search uploaded and stored policy rules to support redlining and compliance review."""
     return await policy_library_search_impl(query=query, policy_ids=policy_ids, limit=limit)
+
+
+@mcp.tool
+async def official_docs_search(provider: str, query: str, max_results: int = 5) -> dict:
+    """Search official documentation sources for languages and frameworks."""
+    return await official_docs_search_impl(provider=provider, query=query, max_results=max_results)
+
+
+@mcp.tool
+async def java_docs_search(query: str, max_results: int = 5) -> dict:
+    """Search official Oracle Java documentation."""
+    return await java_docs_search_impl(query=query, max_results=max_results)
+
+
+@mcp.tool
+async def python_docs_search(query: str, max_results: int = 5) -> dict:
+    """Search official Python documentation."""
+    return await python_docs_search_impl(query=query, max_results=max_results)
+
+
+@mcp.tool
+async def spring_docs_search(query: str, max_results: int = 5) -> dict:
+    """Search official Spring documentation."""
+    return await spring_docs_search_impl(query=query, max_results=max_results)
+
+
+@mcp.tool
+async def dotnet_docs_search(query: str, max_results: int = 5) -> dict:
+    """Search official .NET documentation."""
+    return await dotnet_docs_search_impl(query=query, max_results=max_results)
+
+
+@mcp.tool
+async def remote_agent_discover(agent_card_url: str) -> dict:
+    """Fetch a remote A2A agent card over HTTP."""
+    return await remote_agent_discover_impl(agent_card_url=agent_card_url)
+
+
+@mcp.tool
+async def remote_agent_dispatch(agent_card_url: str, input_data: dict, workflow_run_id: str, from_agent: str, message_type: str = "delegation") -> dict:
+    """Dispatch a payload to a remote A2A agent over HTTP."""
+    return await remote_agent_dispatch_impl(
+        agent_card_url=agent_card_url,
+        input_data=input_data,
+        workflow_run_id=workflow_run_id,
+        from_agent=from_agent,
+        message_type=message_type,
+    )
 
 
 @mcp.tool
@@ -315,6 +547,16 @@ TOOL_REGISTRY = {
     "risk_scorer": risk_scorer_impl,
     "wikipedia_search": wikipedia_search_impl,
     "webpage_fetch": webpage_fetch_impl,
+    "weather_current": weather_current_impl,
+    "openweather_current": openweather_current_impl,
+    "serpapi_search": serpapi_search_impl,
+    "official_docs_search": official_docs_search_impl,
+    "java_docs_search": java_docs_search_impl,
+    "python_docs_search": python_docs_search_impl,
+    "spring_docs_search": spring_docs_search_impl,
+    "dotnet_docs_search": dotnet_docs_search_impl,
+    "remote_agent_discover": remote_agent_discover_impl,
+    "remote_agent_dispatch": remote_agent_dispatch_impl,
     "trigger_hitl": trigger_hitl_impl,
 }
 
@@ -327,5 +569,15 @@ TOOL_METADATA = {
     "risk_scorer": {"description": "Score text for business and compliance risk.", "category": "analysis"},
     "wikipedia_search": {"description": "Search Wikipedia for background context and reference links.", "category": "web"},
     "webpage_fetch": {"description": "Fetch a webpage and return cleaned text content.", "category": "web"},
+    "weather_current": {"description": "Fetch current weather from Open-Meteo using latitude and longitude.", "category": "realtime"},
+    "openweather_current": {"description": "Fetch current weather from OpenWeather using a configured API key.", "category": "realtime"},
+    "serpapi_search": {"description": "Fetch live search-engine results through SerpAPI using a configured API key.", "category": "web"},
+    "official_docs_search": {"description": "Search official docs for Java, Python, Spring, and .NET.", "category": "research"},
+    "java_docs_search": {"description": "Search Oracle Java documentation.", "category": "research"},
+    "python_docs_search": {"description": "Search official Python documentation.", "category": "research"},
+    "spring_docs_search": {"description": "Search official Spring documentation.", "category": "research"},
+    "dotnet_docs_search": {"description": "Search official .NET documentation.", "category": "research"},
+    "remote_agent_discover": {"description": "Fetch a remote A2A agent card over HTTP.", "category": "a2a"},
+    "remote_agent_dispatch": {"description": "Dispatch work to a remote A2A agent over HTTP.", "category": "a2a"},
     "trigger_hitl": {"description": "Pause a workflow for human approval.", "category": "control"},
 }

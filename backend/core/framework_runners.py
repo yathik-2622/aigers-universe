@@ -9,6 +9,7 @@ from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+from a2a.agent_communication import dispatch_remote_agent
 from config import settings
 from mcp_tools.tool_server import TOOL_REGISTRY
 
@@ -171,6 +172,51 @@ def _build_langchain_tools(
             default=str,
         )
 
+    async def wikipedia_search(query: str, limit: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["wikipedia_search"](query=query, limit=limit), default=str)
+
+    async def webpage_fetch(url: str, max_chars: int = 5000) -> str:
+        return json.dumps(await TOOL_REGISTRY["webpage_fetch"](url=url, max_chars=max_chars), default=str)
+
+    async def weather_current(latitude: float, longitude: float, timezone: str = "auto") -> str:
+        return json.dumps(await TOOL_REGISTRY["weather_current"](latitude=latitude, longitude=longitude, timezone=timezone), default=str)
+
+    async def openweather_current(latitude: float, longitude: float, units: str = "metric") -> str:
+        return json.dumps(await TOOL_REGISTRY["openweather_current"](latitude=latitude, longitude=longitude, units=units), default=str)
+
+    async def serpapi_search(query: str, num: int = 5, location: str | None = None) -> str:
+        return json.dumps(await TOOL_REGISTRY["serpapi_search"](query=query, num=num, location=location), default=str)
+
+    async def official_docs_search(provider: str, query: str, max_results: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["official_docs_search"](provider=provider, query=query, max_results=max_results), default=str)
+
+    async def java_docs_search(query: str, max_results: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["java_docs_search"](query=query, max_results=max_results), default=str)
+
+    async def python_docs_search(query: str, max_results: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["python_docs_search"](query=query, max_results=max_results), default=str)
+
+    async def spring_docs_search(query: str, max_results: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["spring_docs_search"](query=query, max_results=max_results), default=str)
+
+    async def dotnet_docs_search(query: str, max_results: int = 5) -> str:
+        return json.dumps(await TOOL_REGISTRY["dotnet_docs_search"](query=query, max_results=max_results), default=str)
+
+    async def remote_agent_discover(agent_card_url: str) -> str:
+        return json.dumps(await TOOL_REGISTRY["remote_agent_discover"](agent_card_url=agent_card_url), default=str)
+
+    async def remote_agent_dispatch(agent_card_url: str, input_data: dict, message_type: str = "delegation") -> str:
+        return json.dumps(
+            await TOOL_REGISTRY["remote_agent_dispatch"](
+                agent_card_url=agent_card_url,
+                input_data=input_data,
+                workflow_run_id=workflow_run_id,
+                from_agent=agent_name,
+                message_type=message_type,
+            ),
+            default=str,
+        )
+
     async def trigger_hitl(reason: str, severity: str, context: dict | None = None) -> str:
         return json.dumps(
             await TOOL_REGISTRY["trigger_hitl"](
@@ -189,6 +235,18 @@ def _build_langchain_tools(
         "rules_engine_check": rules_engine_check,
         "risk_scorer": risk_scorer,
         "policy_library_search": policy_library_search,
+        "wikipedia_search": wikipedia_search,
+        "webpage_fetch": webpage_fetch,
+        "weather_current": weather_current,
+        "openweather_current": openweather_current,
+        "serpapi_search": serpapi_search,
+        "official_docs_search": official_docs_search,
+        "java_docs_search": java_docs_search,
+        "python_docs_search": python_docs_search,
+        "spring_docs_search": spring_docs_search,
+        "dotnet_docs_search": dotnet_docs_search,
+        "remote_agent_discover": remote_agent_discover,
+        "remote_agent_dispatch": remote_agent_dispatch,
         "trigger_hitl": trigger_hitl,
     }
     descriptions = {
@@ -197,6 +255,18 @@ def _build_langchain_tools(
         "rules_engine_check": "Check text against governance rules and selected workflow policies.",
         "risk_scorer": "Score text for business and compliance risk.",
         "policy_library_search": "Search uploaded policy documents and saved rules for guidance.",
+        "wikipedia_search": "Search Wikipedia for public background and reference links.",
+        "webpage_fetch": "Fetch a web page and return cleaned text content.",
+        "weather_current": "Fetch current weather from Open-Meteo.",
+        "openweather_current": "Fetch current weather from OpenWeather with API key.",
+        "serpapi_search": "Fetch live search engine results via SerpAPI.",
+        "official_docs_search": "Search official documentation for languages and frameworks.",
+        "java_docs_search": "Search official Oracle Java documentation.",
+        "python_docs_search": "Search official Python documentation.",
+        "spring_docs_search": "Search official Spring documentation.",
+        "dotnet_docs_search": "Search official .NET documentation.",
+        "remote_agent_discover": "Fetch a remote A2A agent card over HTTP.",
+        "remote_agent_dispatch": "Dispatch work to a remote A2A agent over HTTP using the current workflow context.",
         "trigger_hitl": "Pause the workflow and request human review. Workflow and agent context are injected automatically.",
     }
 
@@ -368,10 +438,35 @@ async def run_framework_agent(
     selected_policy_ids = (input_data.get("original_input") or {}).get("policy_ids", [])
     user_message = _compose_user_message(input_data, upstream_messages, selected_policy_ids)
     start = time.perf_counter()
+    a2a_mode = (agent_config.get("a2a_mode") or "local").lower()
+    remote_agent_card_url = (agent_config.get("remote_agent_card_url") or "").strip()
 
     logger.info("agent.invoke.start", agent_name=agent_name, framework=framework, step=step_number, model=model_name)
 
     try:
+        if agent_config.get("a2a_enabled", True) and a2a_mode == "remote" and remote_agent_card_url:
+            remote = await dispatch_remote_agent(
+                agent_card_url=remote_agent_card_url,
+                input_data=input_data,
+                workflow_run_id=workflow_run_id,
+                from_agent=agent_name,
+                message_type="delegation",
+            )
+            remote_result = (remote.get("result") or {}).get("result") or {}
+            remote_output = remote_result.get("output", remote_result)
+            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            return {
+                "agent_name": agent_name,
+                "framework": framework,
+                "output": remote_output if isinstance(remote_output, dict) else {"result": remote_output},
+                "tokens_used": remote_result.get("tokens_used", 0),
+                "prompt_tokens": remote_result.get("prompt_tokens", 0),
+                "completion_tokens": remote_result.get("completion_tokens", 0),
+                "latency_ms": latency_ms,
+                "tools_called": ["remote_agent_dispatch"],
+                "status": remote_result.get("status", "success"),
+                "error": remote_result.get("error"),
+            }
         if framework == "langchain":
             raw = await _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids)
         elif framework == "crewai":

@@ -14,6 +14,7 @@ function StatusIcon({ status }) {
 
 function AgentNodeComponent({ data, selected }) {
   const status = data?.runStatus
+  const bindingCount = Object.values(data?.input_bindings || {}).filter(Boolean).length
   const stateRing =
     status === 'running' ? 'border-accent shadow-glow glow-pulse'
     : status === 'completed' || status === 'success' ? 'border-ok/60'
@@ -45,9 +46,19 @@ function AgentNodeComponent({ data, selected }) {
               <ShieldCheck size={9} /> HITL
             </span>
           )}
+          {data?.a2a_enabled && (
+            <span className={`text-[9px] uppercase font-mono px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${data?.a2a_mode === 'remote' ? 'border-accent/40 text-accent bg-accent/10' : 'border-line text-muted'}`}>
+              A2A {data?.a2a_mode === 'remote' ? 'REMOTE' : 'LOCAL'}
+            </span>
+          )}
           {Array.isArray(data?.tools) && data.tools.length > 0 && (
             <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded border border-line text-muted inline-flex items-center gap-1">
               <Wrench size={9} /> {data.tools.length}
+            </span>
+          )}
+          {data?.input_bindings && (
+            <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded border border-line text-muted inline-flex items-center gap-1">
+              IN {bindingCount}
             </span>
           )}
         </div>

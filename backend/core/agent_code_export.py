@@ -34,17 +34,25 @@ def _python_template(agent: dict, framework: str) -> str:
 
     if framework == "crewai":
         return textwrap.dedent(f"""
-        from crewai import Agent
+        from crewai import Agent, LLM
+
+        llm = LLM(
+            model={json.dumps(f"openai/{model}")},
+            api_key="YOUR_API_KEY",
+            base_url="YOUR_OPENAI_COMPATIBLE_BASE_URL",
+        )
 
         {name.replace(" ", "_").lower()} = Agent(
             role={json.dumps(name)},
             goal={json.dumps(description or "Execute the assigned enterprise workflow reliably.")},
             backstory={json.dumps(prompt)},
-            llm={json.dumps(model)},
-            tools=[],  # Wire MCP tool adapters here
+            llm=llm,
+            tools=[],  # Wire MCP/A2A adapters here
             allow_delegation=True,
             verbose=True,
         )
+
+        # Configured tools: {_py_list(tools)}
         """).strip()
 
     if framework == "langchain":
@@ -70,10 +78,12 @@ def _python_template(agent: dict, framework: str) -> str:
             name={json.dumps(name)},
             model=OpenAIChat(id={json.dumps(model)}),
             instructions={json.dumps(prompt)},
-            tools=[],  # Add MCP-compatible tool wrappers here
+            tools=[],  # Add MCP/A2A-compatible tool wrappers here
             markdown=True,
             add_datetime_to_instructions=True,
         )
+
+        # Configured tools: {_py_list(tools)}
         """).strip()
 
     return textwrap.dedent(f"""

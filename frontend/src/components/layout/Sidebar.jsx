@@ -22,7 +22,7 @@ export default function Sidebar() {
       { to: '/marketplace', label: 'Marketplace', icon: Store, id: 'marketplace' },
       { to: '/agents', label: 'Agents', icon: Cpu, id: 'agents' },
       { to: '/builder', label: 'Workflow Builder', icon: Workflow, id: 'builder' },
-      { to: '/tools-chat', label: 'Tool Playground', icon: Wrench, id: 'tools-chat' },
+      { to: '/tools-chat', label: 'MCP Studio', icon: Wrench, id: 'tools-chat' },
       { to: '/hitl', label: 'HITL Approvals', icon: ShieldCheck, id: 'hitl' },
       { to: '/observability', label: 'Observability', icon: Activity, id: 'observability' },
     ]

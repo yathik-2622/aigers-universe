@@ -12,3 +12,4 @@ export const listModels = () => api.get('/platform/models').then(r => r.data)
 
 export const listTemplates = (search) => api.get('/marketplace/templates', { params: { search } }).then(r => r.data)
 export const installTemplate = (id, body = {}) => api.post(`/marketplace/templates/${id}/install`, body).then(r => r.data)
+export const getTemplateCode = (id, framework) => api.get(`/marketplace/templates/${id}/code`, { params: { framework }, responseType: 'text' }).then(r => r.data)

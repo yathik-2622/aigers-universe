@@ -1,14 +1,26 @@
 import React, { useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Database, Download, FileText, Lightbulb, Search, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Code2, Database, Download, FileText, Lightbulb, Search, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { installTemplate, listTemplates } from '../api/platform.js'
+import CodeSnippet from '../components/common/CodeSnippet.jsx'
+import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
+import ModalShell from '../components/common/ModalShell.jsx'
+import { getTemplateCode, installTemplate, listTemplates } from '../api/platform.js'
 
 const ICONS = { FileText, Database, AlertTriangle, ShieldCheck, Lightbulb }
+const EXPORT_FRAMEWORKS = [
+  { value: 'langgraph', label: 'LangGraph Python' },
+  { value: 'langchain', label: 'LangChain Python' },
+  { value: 'crewai', label: 'CrewAI Python' },
+  { value: 'agno', label: 'Agno Python' },
+  { value: 'langflow', label: 'Langflow JSON' },
+]
 
 export default function MarketplacePage() {
   const [templates, setTemplates] = useState([])
   const [search, setSearch] = useState('')
   const [installing, setInstalling] = useState(null)
+  const [preview, setPreview] = useState({ open: false, name: '', templateId: '', framework: 'langgraph', code: '' })
+  const normalizedFramework = (value) => (value || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
 
   const load = (q = '') => listTemplates(q).then(d => setTemplates(d.templates || []))
   useEffect(() => { load() }, [])
@@ -22,6 +34,37 @@ export default function MarketplacePage() {
     } catch {
       toast.error('Failed to install template')
     } finally { setInstalling(null) }
+  }
+
+  const previewCode = async (tpl, framework = tpl.framework) => {
+    try {
+      const code = await getTemplateCode(tpl.template_id, framework)
+      setPreview({ open: true, name: tpl.name, templateId: tpl.template_id, framework, code })
+    } catch {
+      toast.error('Failed to load template code')
+    }
+  }
+
+  const changeFramework = async (framework) => {
+    if (!preview.templateId) return
+    try {
+      const code = await getTemplateCode(preview.templateId, framework)
+      setPreview((prev) => ({ ...prev, framework, code }))
+    } catch {
+      toast.error('Failed to change template export')
+    }
+  }
+
+  const downloadCode = () => {
+    if (!preview.code) return
+    const ext = preview.framework === 'langflow' ? 'json' : 'py'
+    const blob = new Blob([preview.code], { type: ext === 'json' ? 'application/json' : 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${preview.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${preview.framework}.${ext}`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -50,9 +93,14 @@ export default function MarketplacePage() {
               <div className="font-display text-base font-semibold tracking-tight mb-1">{tpl.name}</div>
               <p className="text-[13px] text-muted leading-relaxed mb-4 min-h-[42px]">{tpl.description}</p>
               <div className="flex items-center gap-1.5 flex-wrap mb-4">
+                <FrameworkBadge framework={tpl.framework} />
+                {(tpl.tags || []).filter(tag => normalizedFramework(tag) !== normalizedFramework(tpl.framework)).slice(0, 3).map(tag => <span key={tag} className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-line text-muted bg-elev/50">{tag}</span>)}
                 {(tpl.suggested_tools || []).map(t => <span key={t} className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-line text-muted bg-elev/50">{t}</span>)}
                 {tpl.hitl_enabled && <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-warn/30 text-warn bg-warn/10">HITL</span>}
               </div>
+              <button onClick={() => previewCode(tpl)} className="w-full mb-3 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-full border border-white/10 bg-white/5 text-sm hover:border-accent/40">
+                <Code2 size={13} /> Preview code
+              </button>
               {tpl.installed ? (
                 <div className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-full border border-ok/30 bg-ok/10 text-ok text-sm font-medium">
                   <CheckCircle2 size={13} /> Installed
@@ -66,6 +114,28 @@ export default function MarketplacePage() {
           )
         })}
       </div>
+
+      <ModalShell
+        open={preview.open}
+        onClose={() => setPreview({ open: false, name: '', templateId: '', framework: 'langgraph', code: '' })}
+        title={preview.name || 'Template code'}
+        subtitle="Colorized scaffold for this marketplace agent template."
+        width="max-w-5xl"
+        actions={(
+          <>
+            <select value={preview.framework} onChange={(e) => changeFramework(e.target.value)} className="glass-select px-3 py-2 text-sm outline-none">
+              {EXPORT_FRAMEWORKS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <button onClick={downloadCode} className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white hover:opacity-90">
+              <Download size={14} /> Download
+            </button>
+          </>
+        )}
+      >
+        <div className="p-5">
+          <CodeSnippet code={preview.code} />
+        </div>
+      </ModalShell>
     </div>
   )
 }

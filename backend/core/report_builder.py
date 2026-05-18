@@ -74,14 +74,30 @@ def _fallback_markdown(run: dict, policies: list[dict], pii_findings: list[dict]
 
 async def build_run_report(run: dict) -> dict:
     db = get_db()
-    document_id = (run.get("input_data") or {}).get("document_id")
+    input_data = run.get("input_data") or {}
+    document_id = input_data.get("document_id")
     doc = await db.documents.find_one({"document_id": document_id}, {"_id": 0, "text": 1, "filename": 1}) if document_id else None
     policies = []
     policy_ids = run.get("policy_ids") or []
     if policy_ids:
         policies = await db.governance_rules.find({"rule_id": {"$in": policy_ids}}, {"_id": 0}).to_list(200)
 
-    text = (doc or {}).get("text", "")
+    workflow_inputs = input_data.get("workflow_inputs") or {}
+    workflow_text = workflow_inputs.get("text", "")
+    uploaded_files = workflow_inputs.get("uploaded_files") or []
+    repo_input = workflow_inputs.get("github_repo") or {}
+    fallback_sections = []
+    if workflow_text.strip():
+        fallback_sections.append(f"Workflow text input:\n{workflow_text}")
+    for item in uploaded_files:
+        excerpt = (item.get("text_excerpt") or "").strip()
+        if excerpt:
+            fallback_sections.append(f"Uploaded workflow file: {item.get('filename', 'file')}\n{excerpt}")
+    repo_excerpt = (repo_input.get("text_excerpt") or "").strip()
+    if repo_excerpt:
+        fallback_sections.append(f"Workflow GitHub import: {repo_input.get('repo_url') or repo_input.get('filename', 'repo')}\n{repo_excerpt}")
+
+    text = (doc or {}).get("text", "") or "\n\n".join(fallback_sections)
     lines = _line_map(text)[:200]
     pii_findings = _find_pii(lines)
     llm_payload = {
@@ -92,6 +108,7 @@ async def build_run_report(run: dict) -> dict:
         "final_output": run.get("final_output", {}),
         "policies": policies,
         "document_filename": (doc or {}).get("filename", ""),
+        "workflow_inputs": workflow_inputs,
         "document_lines": lines,
         "pii_findings": pii_findings,
     }

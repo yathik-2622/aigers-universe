@@ -43,6 +43,10 @@ class RegisterAgentRequest(BaseModel):
     model_name: str = Field(default="gpt-4o")
     tools: list[str] = Field(default_factory=list)
     hitl_enabled: bool = Field(default=False)
+    tags: list[str] = Field(default_factory=list)
+    a2a_enabled: bool = Field(default=True)
+    a2a_mode: str = Field(default="local", description="local | remote")
+    remote_agent_card_url: str = Field(default="")
 
 
 class InvokeAgentRequest(BaseModel):
@@ -54,6 +58,8 @@ class InvokeAgentRequest(BaseModel):
 async def register_agent(request: Request, body: RegisterAgentRequest):
     if body.framework not in VALID_FRAMEWORKS:
         raise HTTPException(status_code=422, detail=f"Invalid framework. Must be one of: {VALID_FRAMEWORKS}")
+    if body.a2a_mode not in {"local", "remote"}:
+        raise HTTPException(status_code=422, detail="Invalid a2a_mode. Must be 'local' or 'remote'")
     try:
         agent_id = await repo.create({**body.model_dump(), "owner_user_id": get_optional_user_id(request)})
         logger.info("api.agent.registered", agent_id=agent_id, name=body.name)

@@ -128,6 +128,162 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "weather_current": {
+        "type": "function",
+        "function": {
+            "name": "weather_current",
+            "description": "Fetch current weather from Open-Meteo using latitude and longitude.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                    "timezone": {"type": "string", "default": "auto"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+        },
+    },
+    "openweather_current": {
+        "type": "function",
+        "function": {
+            "name": "openweather_current",
+            "description": "Fetch current weather from OpenWeather using configured API key.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                    "units": {"type": "string", "default": "metric"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+        },
+    },
+    "serpapi_search": {
+        "type": "function",
+        "function": {
+            "name": "serpapi_search",
+            "description": "Fetch live search engine results through SerpAPI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "num": {"type": "integer", "default": 5},
+                    "location": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "official_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "official_docs_search",
+            "description": "Search official docs providers such as Oracle Java, Python, Spring, and .NET.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "enum": ["java", "python", "spring", "dotnet"]},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["provider", "query"],
+            },
+        },
+    },
+    "java_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "java_docs_search",
+            "description": "Search official Oracle Java documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "python_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "python_docs_search",
+            "description": "Search official Python documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "spring_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "spring_docs_search",
+            "description": "Search official Spring documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "dotnet_docs_search": {
+        "type": "function",
+        "function": {
+            "name": "dotnet_docs_search",
+            "description": "Search official .NET documentation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "remote_agent_discover": {
+        "type": "function",
+        "function": {
+            "name": "remote_agent_discover",
+            "description": "Fetch a remote A2A agent card over HTTP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_card_url": {"type": "string"},
+                },
+                "required": ["agent_card_url"],
+            },
+        },
+    },
+    "remote_agent_dispatch": {
+        "type": "function",
+        "function": {
+            "name": "remote_agent_dispatch",
+            "description": "Dispatch work to a remote A2A agent over HTTP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_card_url": {"type": "string"},
+                    "input_data": {"type": "object"},
+                    "workflow_run_id": {"type": "string"},
+                    "from_agent": {"type": "string"},
+                    "message_type": {"type": "string", "enum": ["delegation", "context", "alert", "result"]},
+                },
+                "required": ["agent_card_url", "input_data", "workflow_run_id", "from_agent"],
+            },
+        },
+    },
     "policy_library_search": {
         "type": "function",
         "function": {

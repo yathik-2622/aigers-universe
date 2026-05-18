@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Bot, Database, Paperclip, Search, Send, ShieldCheck, Sparkles, TriangleAlert, Upload, Wrench } from 'lucide-react'
+import { BookOpen, Bot, CloudSun, Database, FileSearch, Globe, Paperclip, Search, Send, ShieldCheck, Sparkles, TriangleAlert, Upload, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { sendToolChat } from '../api/toolChat.js'
 import { listTools } from '../api/platform.js'
-import { uploadDocument } from '../api/documents.js'
+import { importGithubRepo, listDocuments, uploadDocument } from '../api/documents.js'
 
 const TOOL_GUIDES = {
   semantic_search: {
@@ -13,6 +13,14 @@ const TOOL_GUIDES = {
     input: 'Ask for a topic, clause, obligation, or fact you expect to exist in uploaded documents.',
     output: 'Returns ranked matches with chunk text and metadata you can use for downstream review.',
     example: 'Find clauses about termination notice periods in my uploaded contracts.',
+  },
+  knowledge_base_search: {
+    icon: Search,
+    title: 'Knowledge Base Search',
+    purpose: 'Search any uploaded KB material across modernization, architecture, contracts, or policy use cases.',
+    input: 'Ask for architecture notes, migration risks, domain terms, known issues, or requirement snippets.',
+    output: 'Returns semantically matched KB chunks with metadata and rank order.',
+    example: 'Search my modernization KB for service boundaries and current deployment constraints.',
   },
   policy_library_search: {
     icon: BookOpen,
@@ -46,6 +54,46 @@ const TOOL_GUIDES = {
     output: 'Returns saved IDs or retrieved records depending on the action.',
     example: 'Retrieve saved clause-review notes from collection compliance_reviews.',
   },
+  wikipedia_search: {
+    icon: Globe,
+    title: 'Wikipedia Search',
+    purpose: 'Get fast public background context and source links before deeper official-doc research.',
+    input: 'Ask for a topic, technology, company, or domain concept.',
+    output: 'Returns titles, short descriptions, and article URLs.',
+    example: 'Search Wikipedia for strangler fig application modernization pattern.',
+  },
+  webpage_fetch: {
+    icon: FileSearch,
+    title: 'Webpage Fetch',
+    purpose: 'Fetch and clean public pages such as official docs, standards, migration guides, or vendor references.',
+    input: 'Provide a direct URL you want normalized into readable text.',
+    output: 'Returns cleaned text content, source URL, and content length.',
+    example: 'Fetch https://docs.langflow.org/concepts-playground and summarize the key operator workflow.',
+  },
+  weather_current: {
+    icon: CloudSun,
+    title: 'Weather Current',
+    purpose: 'Fetch live current weather without a paid key using Open-Meteo.',
+    input: 'Provide latitude and longitude, or ask with coordinates embedded in the prompt.',
+    output: 'Returns realtime temperature, humidity, wind, precipitation, and units.',
+    example: 'Get current weather for 12.9716, 77.5946.',
+  },
+  openweather_current: {
+    icon: CloudSun,
+    title: 'OpenWeather Current',
+    purpose: 'Fetch live current weather from OpenWeather when your platform has an API key configured.',
+    input: 'Provide latitude, longitude, and optional units.',
+    output: 'Returns the provider payload including weather conditions, clouds, visibility, and location metadata.',
+    example: 'Use OpenWeather for 40.7128, -74.0060 in metric units.',
+  },
+  serpapi_search: {
+    icon: Globe,
+    title: 'SerpAPI Search',
+    purpose: 'Run live search-engine retrieval with production SERP coverage for modernization, vendor, and documentation research.',
+    input: 'Give a focused search query and optional location bias.',
+    output: 'Returns organic results with title, link, snippet, and search metadata.',
+    example: 'Search for official AWS modernization assessment documentation.',
+  },
 }
 
 const STARTER_PROMPTS = [
@@ -56,21 +104,35 @@ const STARTER_PROMPTS = [
 ]
 
 export default function ToolPlaygroundPage() {
-  const [tools, setTools] = useState([])
+  const [toolItems, setToolItems] = useState([])
   const [preferredTool, setPreferredTool] = useState('')
   const [input, setInput] = useState(STARTER_PROMPTS[0])
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [documents, setDocuments] = useState([])
+  const [category, setCategory] = useState('general')
+  const [repoUrl, setRepoUrl] = useState('')
   const fileInput = useRef(null)
 
   useEffect(() => {
-    listTools().then((d) => setTools(d.tools || [])).catch(() => {})
+    listTools().then((d) => setToolItems(d.items || [])).catch(() => {})
+    listDocuments().then((d) => setDocuments(d.documents || [])).catch(() => {})
   }, [])
 
   const visibleGuides = useMemo(
-    () => tools.filter((tool) => TOOL_GUIDES[tool]).map((tool) => ({ key: tool, ...TOOL_GUIDES[tool] })),
-    [tools],
+    () => toolItems.map((tool) => {
+      const guide = TOOL_GUIDES[tool.name] || {
+        icon: Wrench,
+        title: tool.name.replaceAll('_', ' '),
+        purpose: tool.description || 'Platform MCP tool.',
+        input: 'Provide the parameters described in the prompt or tool documentation.',
+        output: 'Returns the tool payload from the backend.',
+        example: `Use ${tool.name} for the current task.`,
+      }
+      return { key: tool.name, category: tool.category, requiresKey: ['serpapi_search', 'openweather_current'].includes(tool.name), ...guide }
+    }),
+    [toolItems],
   )
 
   const submit = async (message = input) => {
@@ -94,14 +156,32 @@ export default function ToolPlaygroundPage() {
     if (!file) return
     setUploading(true)
     try {
-      const res = await uploadDocument(file)
+      const res = await uploadDocument(file, category)
       toast.success(`${res.filename} uploaded for semantic search`)
       setInput((prev) => `${prev}${prev ? '\n\n' : ''}Use the uploaded document ${res.filename} in the next tool step.`)
+      const docs = await listDocuments()
+      setDocuments(docs.documents || [])
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Upload failed')
     } finally {
       setUploading(false)
       e.target.value = ''
+    }
+  }
+
+  const importRepo = async () => {
+    if (!repoUrl.trim()) return toast.error('Enter a GitHub repository URL')
+    setUploading(true)
+    try {
+      const res = await importGithubRepo(repoUrl.trim(), category)
+      toast.success(`Imported ${res.files_indexed} repo files into KB`)
+      const docs = await listDocuments()
+      setDocuments(docs.documents || [])
+      setRepoUrl('')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'GitHub import failed')
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -121,13 +201,32 @@ export default function ToolPlaygroundPage() {
               <label className="text-[11px] uppercase tracking-widest text-muted block mb-2">Preferred tool</label>
               <select value={preferredTool} onChange={(e) => setPreferredTool(e.target.value)} className="glass-select w-full px-4 py-2.5 text-sm outline-none focus:border-accent/40">
                 <option value="">Auto-select best tool</option>
-                {tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}
+                {toolItems.map((tool) => <option key={tool.name} value={tool.name}>{tool.name}</option>)}
               </select>
+            </div>
+            <div className="mt-4">
+              <label className="text-[11px] uppercase tracking-widest text-muted block mb-2">KB upload category</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className="glass-select w-full px-4 py-2.5 text-sm outline-none focus:border-accent/40">
+                <option value="general">General</option>
+                <option value="modernization">Modernization</option>
+                <option value="architecture">Architecture</option>
+                <option value="compliance">Compliance</option>
+                <option value="contracts">Contracts</option>
+                <option value="repo-context">Repo Context</option>
+              </select>
+            </div>
+            <div className="mt-4">
+              <label className="text-[11px] uppercase tracking-widest text-muted block mb-2">GitHub repo import</label>
+              <div className="flex gap-2">
+                <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="flex-1 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm outline-none focus:border-accent/40" />
+                <button onClick={importRepo} disabled={uploading} className="rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">Import</button>
+              </div>
+              <div className="mt-2 text-[11px] text-muted">Public repos work immediately. Private repos can be imported when `GITHUB_TOKEN` is configured on the backend.</div>
             </div>
           </div>
 
           <div className="grid gap-3">
-            {visibleGuides.map(({ key, icon: Icon, title, purpose, input: guideInput, output, example }) => (
+            {visibleGuides.map(({ key, icon: Icon, title, purpose, input: guideInput, output, example, category, requiresKey }) => (
               <div key={key} className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.14)]">
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-9 h-9 rounded-xl border border-accent/30 bg-accent/10 flex items-center justify-center">
@@ -135,8 +234,9 @@ export default function ToolPlaygroundPage() {
                   </div>
                   <div>
                     <div className="font-medium">{title}</div>
-                    <div className="text-[11px] font-mono text-muted">{key}</div>
+                    <div className="text-[11px] font-mono text-muted">{key}{category ? ` · ${category}` : ''}</div>
                   </div>
+                  {requiresKey && <div className="ml-auto rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-warn">Key required</div>}
                 </div>
                 <div className="space-y-2 text-[13px] text-muted leading-relaxed">
                   <div><span className="text-ink font-medium">Use when:</span> {purpose}</div>
@@ -161,6 +261,19 @@ export default function ToolPlaygroundPage() {
                   {prompt}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.14)]">
+            <div className="font-display text-lg mb-3">Your KB history</div>
+            <div className="space-y-2">
+              {documents.slice(0, 8).map((doc) => (
+                <div key={doc.document_id} className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">
+                  <div className="font-medium truncate">{doc.filename}</div>
+                  <div className="text-[11px] text-muted">{doc.category || 'general'} · {doc.file_type} · {doc.chunk_count} chunks</div>
+                </div>
+              ))}
+              {documents.length === 0 && <div className="text-sm text-muted">No uploaded knowledge-base files yet.</div>}
             </div>
           </div>
         </section>
