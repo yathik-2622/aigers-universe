@@ -1,9 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Cpu, Plus, Trash2, Workflow as WfIcon } from 'lucide-react'
+import { Code2, Cpu, Download, Eye, Plus, Trash2, Workflow as WfIcon, X } from 'lucide-react'
 import { toast } from 'sonner'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
-import { deleteAgent, listAgents, listModels, listTools, registerAgent } from '../api/platform.js'
+import { deleteAgent, exportAgentCode, listAgents, listModels, listTools, registerAgent } from '../api/platform.js'
+
+const EXPORT_FRAMEWORKS = [
+  { value: 'langgraph', label: 'LangGraph Python' },
+  { value: 'langchain', label: 'LangChain Python' },
+  { value: 'crewai', label: 'CrewAI Python' },
+  { value: 'agno', label: 'Agno Python' },
+  { value: 'langflow', label: 'Langflow JSON' },
+]
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([])
@@ -11,6 +19,7 @@ export default function AgentsPage() {
   const [models, setModels] = useState([])
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', framework: 'langgraph', description: '', system_prompt: '', model_name: 'gpt-4o', tools: [], hitl_enabled: false })
+  const [codeModal, setCodeModal] = useState({ open: false, agent: null, framework: 'langgraph', content: '' })
 
   const load = () => listAgents().then(d => setAgents(d.agents || []))
   useEffect(() => { load(); listTools().then(d => setTools(d.tools || [])); listModels().then(d => setModels(d.models || [])) }, [])
@@ -29,6 +38,37 @@ export default function AgentsPage() {
       setForm({ name: '', framework: 'langgraph', description: '', system_prompt: '', model_name: 'gpt-4o', tools: [], hitl_enabled: false })
       load()
     } catch { toast.error('Registration failed') }
+  }
+
+  const openCodeModal = async (agent, framework = agent.framework || 'langgraph') => {
+    try {
+      const content = await exportAgentCode(agent.agent_id, framework)
+      setCodeModal({ open: true, agent, framework, content })
+    } catch {
+      toast.error('Failed to load agent code')
+    }
+  }
+
+  const changeExportFramework = async (framework) => {
+    if (!codeModal.agent) return
+    try {
+      const content = await exportAgentCode(codeModal.agent.agent_id, framework)
+      setCodeModal((prev) => ({ ...prev, framework, content }))
+    } catch {
+      toast.error('Failed to change export format')
+    }
+  }
+
+  const downloadCode = () => {
+    if (!codeModal.agent || !codeModal.content) return
+    const ext = codeModal.framework === 'langflow' ? 'json' : 'py'
+    const blob = new Blob([codeModal.content], { type: ext === 'json' ? 'application/json' : 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${codeModal.agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${codeModal.framework}.${ext}`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -65,6 +105,14 @@ export default function AgentsPage() {
               {a.hitl_enabled && <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded border border-warn/30 text-warn bg-warn/10">HITL</span>}
               {(a.tools || []).slice(0, 3).map(t => <span key={t} className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-line text-muted">{t}</span>)}
             </div>
+            <div className="mt-4 flex items-center gap-2">
+              <button onClick={() => openCodeModal(a)} className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-line bg-elev/50 px-3 py-2 text-xs hover:border-accent/40">
+                <Eye size={13} /> View code
+              </button>
+              <button onClick={() => openCodeModal(a, 'langflow')} className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-elev/50 px-3 py-2 text-xs hover:border-accent/40">
+                <Code2 size={13} /> JSON
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -84,6 +132,7 @@ export default function AgentsPage() {
                   <option value="langgraph">LangGraph</option>
                   <option value="crewai">CrewAI</option>
                   <option value="langchain">LangChain</option>
+                  <option value="agno">Agno</option>
                 </select>
               </div>
               <div className="md:col-span-2">
@@ -116,6 +165,36 @@ export default function AgentsPage() {
             <div className="flex items-center gap-2 mt-5">
               <button onClick={() => setShowCreate(false)} className="flex-1 px-4 py-2 rounded-md border border-line text-sm hover:border-bad/40">Cancel</button>
               <button onClick={create} className="flex-1 px-4 py-2 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90">Register</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {codeModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCodeModal({ open: false, agent: null, framework: 'langgraph', content: '' })}>
+          <div className="w-full max-w-5xl max-h-[88vh] rounded-2xl border border-line bg-panel shadow-2xl shadow-black/35 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-line flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-widest text-muted">Agent export</div>
+                <div className="font-display text-lg font-semibold mt-1">{codeModal.agent?.name}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <select value={codeModal.framework} onChange={(e) => changeExportFramework(e.target.value)} className="rounded-md border border-line bg-elev/50 px-3 py-2 text-sm outline-none focus:border-accent/40">
+                  {EXPORT_FRAMEWORKS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+                <button onClick={downloadCode} className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm text-white hover:opacity-90">
+                  <Download size={14} /> Download
+                </button>
+                <button onClick={() => setCodeModal({ open: false, agent: null, framework: 'langgraph', content: '' })} className="rounded-md border border-line bg-elev/50 p-2 text-muted hover:text-ink">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-b border-line text-xs text-muted">
+              Exported code is generated from the registered agent config so teams can inspect the prompt, model, framework shape, and configured tool list before promoting it elsewhere.
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              <pre className="min-h-full whitespace-pre-wrap break-words rounded-xl border border-line bg-elev/40 p-4 text-[12px] leading-6">{codeModal.content}</pre>
             </div>
           </div>
         </div>

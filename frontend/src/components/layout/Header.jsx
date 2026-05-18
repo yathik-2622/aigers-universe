@@ -1,6 +1,5 @@
 import React from 'react'
 import { useLocation } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext.jsx'
 import { useTitle } from '../../context/TitleContext.jsx'
 
 const TITLES = {
@@ -18,9 +17,9 @@ const TITLES = {
 
 export default function Header() {
   const loc = useLocation()
-  const { user, logout } = useAuth()
   const { override } = useTitle()
   const base = '/' + (loc.pathname.split('/')[1] || 'dashboard')
+  if (base === '/dashboard') return null
   const fallback = TITLES[base] || TITLES['/dashboard']
   const meta = override && (override.title || override.subtitle)
     ? { title: override.title || fallback.title, subtitle: override.subtitle || fallback.subtitle }
@@ -33,16 +32,7 @@ export default function Header() {
         <p className="text-[13px] text-muted mt-0.5 truncate" data-testid="header-subtitle">{meta.subtitle}</p>
       </div>
       <div className="flex items-center gap-2.5 shrink-0">
-        {user?.display_name && (
-          <span className="px-2.5 py-1 rounded-md text-[11px] font-mono bg-elev border border-line text-muted">
-            {user.display_name}
-          </span>
-        )}
-        <span className="px-2.5 py-1 rounded-md text-[11px] font-mono bg-elev border border-line text-muted">gpt-4o gateway</span>
         <span className="px-2.5 py-1 rounded-md text-[11px] font-mono bg-accent/10 border border-accent/30 text-accent">live</span>
-        <button onClick={logout} className="px-2.5 py-1 rounded-md text-[11px] font-mono bg-elev border border-line text-muted hover:text-ink">
-          logout
-        </button>
       </div>
     </header>
   )

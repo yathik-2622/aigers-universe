@@ -189,6 +189,7 @@ async def _finalize_run(run_id: str, state: WorkflowState) -> None:
                     "report_markdown": report["markdown"],
                     "report_structured": report["structured"],
                     "pii_findings": report["pii_findings"],
+                    "citations": report["citations"],
                     "updated_at": datetime.datetime.utcnow().isoformat(),
                 }
             },

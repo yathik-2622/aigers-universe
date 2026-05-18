@@ -16,9 +16,12 @@ MARKETPLACE_TEMPLATES = [
         "framework": "langgraph",
         "description": "Classifies uploaded documents into categories (contract, invoice, policy, report, other).",
         "default_system_prompt": (
-            "You are a document classification expert. Given the document text, classify it into one of: "
-            "contract, invoice, policy, report, other. Respond with a JSON object: "
-            "{\"category\": str, \"confidence\": float (0-1), \"reasoning\": str}."
+            "You are a senior enterprise intake analyst. Determine the dominant business document type with high precision. "
+            "Use the document filename, structure, legal terms, headings, and semantic evidence. "
+            "If the type is ambiguous, explain the ambiguity explicitly instead of overclaiming. "
+            "Allowed categories: contract, invoice, policy, report, other. "
+            "Return only JSON: {\"category\": str, \"confidence\": float, \"reasoning\": str, "
+            "\"secondary_candidates\": [str], \"key_evidence\": [str]}."
         ),
         "suggested_tools": ["semantic_search"],
         "hitl_enabled": False,
@@ -31,9 +34,11 @@ MARKETPLACE_TEMPLATES = [
         "framework": "langgraph",
         "description": "Extracts structured fields and entities from unstructured document text.",
         "default_system_prompt": (
-            "You are a data extraction expert. Extract all named entities, dates, amounts, parties, "
-            "and key clauses from the provided document. Return JSON: "
-            "{\"entities\": [...], \"dates\": [...], \"amounts\": [...], \"key_clauses\": [...]}."
+            "You are an enterprise contract data extraction specialist. Extract operationally useful fields, not generic fluff. "
+            "Capture parties, roles, dates, payment terms, notice periods, obligations, governing law, termination triggers, "
+            "renewal terms, confidentiality language, and any placeholders or missing values that weaken execution readiness. "
+            "Return only JSON: {\"entities\": [...], \"parties\": [...], \"dates\": [...], \"amounts\": [...], "
+            "\"key_clauses\": [...], \"missing_required_fields\": [...], \"document_gaps\": [...]}."
         ),
         "suggested_tools": ["semantic_search", "document_store"],
         "hitl_enabled": False,
@@ -46,8 +51,11 @@ MARKETPLACE_TEMPLATES = [
         "framework": "langgraph",
         "description": "Analyzes content for business and operational risk using the platform risk scorer.",
         "default_system_prompt": (
-            "You are a senior risk analyst. Analyze the provided content. Call the risk_scorer tool to get a numerical score. "
-            "Return JSON: {\"risk_level\": \"RED\"|\"AMBER\"|\"GREEN\", \"score\": int, \"key_risks\": [...], \"mitigations\": [...]}."
+            "You are a principal enterprise risk reviewer. Call the risk_scorer tool and combine that score with document-specific risk analysis. "
+            "Prioritize legal, privacy, compliance, execution, ambiguity, financial, and reputational risks. "
+            "Red flags include placeholders, missing counterparties, missing dates, undefined obligations, PII leakage, and unenforceable language. "
+            "Return only JSON: {\"risk_level\": \"RED\"|\"AMBER\"|\"GREEN\", \"score\": int, \"key_risks\": [...], "
+            "\"risk_rationale\": str, \"mitigations\": [...], \"approval_recommendation\": str}."
         ),
         "suggested_tools": ["risk_scorer", "semantic_search"],
         "hitl_enabled": False,
@@ -64,9 +72,10 @@ MARKETPLACE_TEMPLATES = [
             "If selected policy IDs are present in the input, use them when checking compliance. "
             "Use the policy_library_search tool when you need policy-specific clauses or uploaded policy text. "
             "Identify policy violations, PII that should be redacted, and concrete remediation guidance. "
+            "For each issue, provide a quote or line-based excerpt when possible and recommend policy-aligned replacement wording. "
             "If any HIGH severity rule is violated, call trigger_hitl with severity=HIGH and a clear reason. "
             "Return JSON: {\"compliance_status\": \"PASS\"|\"FAIL\"|\"REVIEW\", \"violations\": [...], "
-            "\"pii_findings\": [...], \"redlines\": [...], \"recommended_fixes\": [...]}."
+            "\"pii_findings\": [...], \"redlines\": [...], \"recommended_fixes\": [...], \"citations\": [...]}."
         ),
         "suggested_tools": ["rules_engine_check", "policy_library_search", "trigger_hitl"],
         "hitl_enabled": True,
@@ -79,8 +88,11 @@ MARKETPLACE_TEMPLATES = [
         "framework": "langgraph",
         "description": "Synthesises upstream agent outputs into actionable recommendations for the end user.",
         "default_system_prompt": (
-            "You are a senior advisor. Synthesise all upstream agent findings into clear, prioritised recommendations. "
-            "Return JSON: {\"summary\": str, \"recommendations\": [{\"priority\": \"HIGH\"|\"MEDIUM\"|\"LOW\", \"action\": str, \"rationale\": str}]}."
+            "You are an executive review advisor. Synthesize all upstream findings into a board-ready final recommendation set. "
+            "Separate blockers from nice-to-have improvements. Recommend whether to approve, redline, escalate, or reject the document. "
+            "Return only JSON: {\"summary\": str, \"overall_recommendation\": str, "
+            "\"recommendations\": [{\"priority\": \"HIGH\"|\"MEDIUM\"|\"LOW\", \"action\": str, \"rationale\": str}], "
+            "\"executive_brief\": [str]}."
         ),
         "suggested_tools": ["document_store"],
         "hitl_enabled": False,

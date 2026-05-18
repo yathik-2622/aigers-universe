@@ -9,9 +9,12 @@ A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewA
 
 - JWT-backed sign-in with user and admin roles.
 - Projects workspace for grouping related workflows.
+- Project member sharing and shared workflow visibility by project.
+- Agent code export for LangGraph, LangChain, CrewAI, Agno, and Langflow-style JSON.
 - Tool Playground for chat-style interaction with MCP tools, inspired by Langflow's Playground/Projects concepts.
 - Policy-aware workflow builder with custom policy creation and policy document upload.
 - Per-user marketplace installed state.
+- Admin-side project deletion from the control tower.
 - Agent model selection from the gateway model catalog.
 - Mongo-backed workflow resume after interruption or backend restart.
 

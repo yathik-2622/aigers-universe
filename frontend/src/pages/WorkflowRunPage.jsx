@@ -17,6 +17,7 @@ export default function WorkflowRunPage() {
   const [showReport, setShowReport] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [resuming, setResuming] = useState(false)
+  const [activeCitation, setActiveCitation] = useState(null)
 
   useEffect(() => {
     if (run?.workflow_name) {
@@ -211,7 +212,32 @@ export default function WorkflowRunPage() {
                   </div>
                 </div>
               )}
+              {report.citations?.length > 0 && (
+                <div className="mt-6">
+                  <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Citations</div>
+                  <div className="flex flex-wrap gap-2">
+                    {report.citations.map((citation, idx) => (
+                      <button key={idx} onClick={() => setActiveCitation(citation)} className="px-3 py-1.5 rounded-full border border-accent/30 bg-accent/10 text-accent text-xs hover:opacity-90">
+                        {citation.label || `Citation ${idx + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeCitation && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-6" onClick={() => setActiveCitation(null)}>
+          <div className="w-full max-w-xl rounded-xl border border-line bg-panel p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-display text-lg">{activeCitation.label || 'Citation'}</div>
+              <button onClick={() => setActiveCitation(null)} className="text-muted hover:text-ink text-sm">Close</button>
+            </div>
+            <div className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{activeCitation.excerpt || 'No excerpt provided.'}</div>
+            <div className="mt-4 text-[12px] text-muted">Source: {activeCitation.source_type || 'reference'} {activeCitation.source_ref ? `· ${activeCitation.source_ref}` : ''}</div>
           </div>
         </div>
       )}

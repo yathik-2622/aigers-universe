@@ -104,7 +104,7 @@ async def build_run_report(run: dict) -> dict:
                         "You are a legal operations reviewer. Produce ONLY valid JSON with keys: "
                         "executive_summary (string), overall_decision (string), redlines (array of objects with line_number, "
                         "issue, original_text, suggested_text, policy_reference), pii_findings (array), "
-                        "policy_recommendations (array of strings), next_actions (array of strings), markdown (string). "
+                        "policy_recommendations (array of strings), next_actions (array of strings), citations (array of objects with label, excerpt, source_type, source_ref), markdown (string). "
                         "The markdown must be human-readable with headings, bullets, and concise policy-aligned guidance."
                     ),
                 },
@@ -119,6 +119,7 @@ async def build_run_report(run: dict) -> dict:
             "structured": parsed,
             "markdown": markdown,
             "pii_findings": parsed.get("pii_findings", pii_findings),
+            "citations": parsed.get("citations", []),
         }
     except Exception:
         markdown = _fallback_markdown(run, policies, pii_findings)
@@ -130,8 +131,10 @@ async def build_run_report(run: dict) -> dict:
                 "pii_findings": pii_findings,
                 "policy_recommendations": [],
                 "next_actions": [],
+                "citations": [],
                 "markdown": markdown,
             },
             "markdown": markdown,
             "pii_findings": pii_findings,
+            "citations": [],
         }

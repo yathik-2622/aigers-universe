@@ -11,12 +11,48 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from db.mongo_client import get_db
-from core.request_context import get_optional_user_id
+from core.request_context import get_optional_role, get_optional_user_id
 from core.workflow_engine import build_and_run_workflow, resume_workflow_run
 from a2a.agent_communication import get_a2a_messages
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+async def _accessible_project_ids(db, user_id: str | None, role: str | None) -> list[str]:
+    if not user_id or role == "admin":
+        return []
+    projects = await db.projects.find(
+        {"$or": [{"owner_user_id": user_id}, {"member_ids": user_id}]},
+        {"_id": 0, "project_id": 1},
+    ).to_list(500)
+    return [p["project_id"] for p in projects]
+
+
+async def _workflow_query(db, request: Request, extra: dict | None = None) -> dict:
+    query = dict(extra or {})
+    user_id = get_optional_user_id(request)
+    role = get_optional_role(request)
+    if not user_id or role == "admin":
+        return query
+    project_ids = await _accessible_project_ids(db, user_id, role)
+    query["$or"] = [{"owner_user_id": user_id}]
+    if project_ids:
+        query["$or"].append({"project_id": {"$in": project_ids}})
+    return query
+
+
+async def _run_query(db, request: Request, extra: dict | None = None) -> dict:
+    query = dict(extra or {})
+    user_id = get_optional_user_id(request)
+    role = get_optional_role(request)
+    if not user_id or role == "admin":
+        return query
+    project_ids = await _accessible_project_ids(db, user_id, role)
+    query["$or"] = [{"owner_user_id": user_id}]
+    if project_ids:
+        query["$or"].append({"project_id": {"$in": project_ids}})
+    return query
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -58,12 +94,7 @@ async def create_workflow(request: Request, body: CreateWorkflowRequest):
 @router.get("")
 async def list_workflows(request: Request, project_id: str | None = None):
     db = get_db()
-    query = {}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
-    if project_id:
-        query["project_id"] = project_id
+    query = await _workflow_query(db, request, {"project_id": project_id} if project_id else {})
     workflows = await db.workflow_definitions.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"workflows": workflows, "count": len(workflows)}
 
@@ -71,10 +102,7 @@ async def list_workflows(request: Request, project_id: str | None = None):
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: str, request: Request):
     db = get_db()
-    query = {"workflow_id": workflow_id}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
+    query = await _workflow_query(db, request, {"workflow_id": workflow_id})
     wf = await db.workflow_definitions.find_one(query, {"_id": 0})
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
@@ -84,10 +112,8 @@ async def get_workflow(workflow_id: str, request: Request):
 @router.post("/{workflow_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequest):
     db = get_db()
-    query = {"workflow_id": workflow_id}
+    query = await _workflow_query(db, request, {"workflow_id": workflow_id})
     user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
     wf = await db.workflow_definitions.find_one(query)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
@@ -102,10 +128,7 @@ async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequ
 @router.get("/runs/all")
 async def list_all_runs(request: Request, limit: int = 50):
     db = get_db()
-    query = {}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
+    query = await _run_query(db, request)
     runs = await db.workflow_runs.find(query, {"_id": 0}).sort("started_at", -1).limit(limit).to_list(limit)
     return {"runs": runs, "count": len(runs)}
 
@@ -113,10 +136,7 @@ async def list_all_runs(request: Request, limit: int = 50):
 @router.get("/runs/{run_id}")
 async def get_run_status(run_id: str, request: Request):
     db = get_db()
-    query = {"run_id": run_id}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
+    query = await _run_query(db, request, {"run_id": run_id})
     run = await db.workflow_runs.find_one(query, {"_id": 0})
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
@@ -128,10 +148,7 @@ async def get_run_status(run_id: str, request: Request):
 @router.get("/runs/{run_id}/report")
 async def get_run_report(run_id: str, request: Request):
     db = get_db()
-    query = {"run_id": run_id}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
+    query = await _run_query(db, request, {"run_id": run_id})
     run = await db.workflow_runs.find_one(query, {"_id": 0})
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
@@ -145,6 +162,7 @@ async def get_run_report(run_id: str, request: Request):
         "markdown": run.get("report_markdown", ""),
         "structured": run.get("report_structured", {}),
         "pii_findings": run.get("pii_findings", []),
+        "citations": run.get("citations", []),
         "failure_reason": run.get("failure_reason"),
     }
 
@@ -152,10 +170,7 @@ async def get_run_report(run_id: str, request: Request):
 @router.post("/runs/{run_id}/resume")
 async def resume_run(run_id: str, request: Request):
     db = get_db()
-    query = {"run_id": run_id}
-    user_id = get_optional_user_id(request)
-    if user_id:
-        query["owner_user_id"] = user_id
+    query = await _run_query(db, request, {"run_id": run_id})
     run = await db.workflow_runs.find_one(query, {"_id": 0})
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
@@ -185,10 +200,7 @@ async def stream_run(run_id: str, request: Request):
         max_idle_loops = 600  # ~5 min @ 500ms — guards against orphaned streams
 
         while True:
-            query = {"run_id": run_id}
-            user_id = get_optional_user_id(request)
-            if user_id:
-                query["owner_user_id"] = user_id
+            query = await _run_query(db, request, {"run_id": run_id})
             run = await db.workflow_runs.find_one(query, {"_id": 0})
             if not run:
                 yield f"event: error\ndata: {json.dumps({'error': 'run not found'})}\n\n"

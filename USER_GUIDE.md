@@ -429,6 +429,8 @@ Click the run id to jump back into the live run page.
 - Users whose email appears in `ADMIN_EMAILS` are elevated to the `admin` role and can open `/admin` for full-platform visibility.
 - Use `/projects` to group multiple workflows under a shared project context before saving or running them.
 - The workflow builder stores the selected `project_id` with the workflow definition so future runs stay associated with the same workspace.
+- Project owners can edit member emails from the Projects page, and invited users gain shared access to project workflows and runs.
+- Admin users can delete projects from the Admin View when cleanup is required; workflows and runs are detached instead of destroyed.
 
 ## Tool Playground And Policy Uploads
 
@@ -436,6 +438,8 @@ Click the run id to jump back into the live run page.
 - You can let the backend auto-select a tool or force a specific safe tool such as `policy_library_search`, `rules_engine_check`, or `risk_scorer`.
 - In Workflow Builder, policy documents can be uploaded directly. Uploaded policy text is stored in Mongo and can be queried through `policy_library_search`.
 - If an agent should use policy text directly, enable the `policy_library_search` tool on that agent in Agents or the node config panel.
+- Each tool card now explains when to use the tool, what input to provide, what output to expect, and offers example prompts for operators.
+- The Agents page can export each registered agent as LangGraph, LangChain, CrewAI, Agno, or Langflow-style code/JSON for review and download.
 - **MCP** — Model Context Protocol. Open spec for exposing tools to LLM agents. We use `fastmcp` + `fastapi-mcp`.
 - **A2A** — Agent-to-Agent. Google's open spec for inter-agent messaging. We use `python-a2a` for descriptors + Mongo for the message bus.
 - **LangGraph** — Stateful graph orchestration over LangChain. We use it for the workflow chain + `interrupt()`/`Command` HITL resume.

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Briefcase, ChevronsLeft, ChevronsRight, Cpu, Hexagon, LayoutDashboard, ShieldCheck, Store, Workflow, Wrench, UserCog } from 'lucide-react'
+import { Activity, Briefcase, ChevronsLeft, ChevronsRight, Cpu, Hexagon, LayoutDashboard, LogOut, ShieldCheck, Store, Workflow, Wrench, UserCog } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const STORAGE_KEY = 'aigers.sidebar.collapsed'
 
 export default function Sidebar() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(STORAGE_KEY) === '1' } catch { return false }
   })
@@ -66,7 +66,12 @@ export default function Sidebar() {
             <span className="w-1.5 h-1.5 rounded-full bg-ok" />
             <span className="text-ink font-medium">Gateway online</span>
           </div>
+          <div className="text-ink font-medium truncate">{user?.display_name || 'Workspace user'}</div>
+          <div className="truncate">{user?.email || ''}</div>
           JWT · MCP · A2A · Mongo resume
+          <button onClick={logout} className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-panel/70 px-3 py-2 text-[12px] text-muted hover:text-ink">
+            <LogOut size={13} /> Logout
+          </button>
         </div>
       )}
       {collapsed && <div className="mb-3 flex justify-center" title="Gateway online"><span className="w-2 h-2 rounded-full bg-ok animate-pulse" /></div>}

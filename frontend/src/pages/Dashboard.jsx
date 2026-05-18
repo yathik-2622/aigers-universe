@@ -5,6 +5,7 @@ import { getMetrics } from '../api/observability.js'
 import { listWorkflows, listAllRuns } from '../api/workflows.js'
 import { listAgents } from '../api/platform.js'
 import { getPending } from '../api/hitl.js'
+import { listDocuments } from '../api/documents.js'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 
 function Stat({ label, value, icon: Icon, accent }) {
@@ -27,13 +28,15 @@ export default function Dashboard() {
   const [workflows, setWorkflows] = useState([])
   const [runs, setRuns] = useState([])
   const [pending, setPending] = useState([])
+  const [documents, setDocuments] = useState([])
 
   const load = async () => {
     try {
       const [m, a, w, r, p] = await Promise.all([
         getMetrics(), listAgents(), listWorkflows(), listAllRuns(), getPending(),
       ])
-      setMetrics(m); setAgents(a.agents || []); setWorkflows(w.workflows || []); setRuns(r.runs || []); setPending(p.pending || [])
+      const d = await listDocuments()
+      setMetrics(m); setAgents(a.agents || []); setWorkflows(w.workflows || []); setRuns(r.runs || []); setPending(p.pending || []); setDocuments(d.documents || [])
     } catch {}
   }
   useEffect(() => { load(); const t = setInterval(load, 6000); return () => clearInterval(t) }, [])
@@ -129,6 +132,25 @@ export default function Dashboard() {
               </Link>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-line bg-panel/60 backdrop-blur p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-muted">Your recent uploads</div>
+            <div className="font-display text-lg mt-0.5">Documents in your workspace</div>
+          </div>
+          <div className="text-[12px] text-muted">{documents.length} files</div>
+        </div>
+        <div className="space-y-2">
+          {documents.slice(0, 6).map(doc => (
+            <div key={doc.document_id} className="rounded-lg border border-line bg-elev/40 px-3 py-2">
+              <div className="text-sm font-medium truncate">{doc.filename}</div>
+              <div className="text-[11px] text-muted">{doc.chunk_count} chunks · {(doc.uploaded_at || '').slice(0, 16).replace('T', ' ')}</div>
+            </div>
+          ))}
+          {documents.length === 0 && <div className="text-sm text-muted py-4">No uploaded documents yet.</div>}
         </div>
       </div>
     </div>
