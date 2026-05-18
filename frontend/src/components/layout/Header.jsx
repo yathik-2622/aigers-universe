@@ -15,11 +15,13 @@ const TITLES = {
   '/admin': { title: 'Admin Control Tower', subtitle: 'Global visibility across users, projects, and workflow operations.' },
 }
 
+const HIDDEN_ROUTES = new Set(['/dashboard', '/projects', '/marketplace', '/agents', '/hitl', '/admin'])
+
 export default function Header() {
   const loc = useLocation()
   const { override } = useTitle()
   const base = '/' + (loc.pathname.split('/')[1] || 'dashboard')
-  if (base === '/dashboard') return null
+  if (HIDDEN_ROUTES.has(base)) return null
   const fallback = TITLES[base] || TITLES['/dashboard']
   const meta = override && (override.title || override.subtitle)
     ? { title: override.title || fallback.title, subtitle: override.subtitle || fallback.subtitle }

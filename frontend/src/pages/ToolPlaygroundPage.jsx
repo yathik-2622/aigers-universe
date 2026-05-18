@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { BookOpen, Bot, Database, Search, Send, ShieldCheck, Sparkles, TriangleAlert, Wrench } from 'lucide-react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { BookOpen, Bot, Database, Paperclip, Search, Send, ShieldCheck, Sparkles, TriangleAlert, Upload, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { sendToolChat } from '../api/toolChat.js'
 import { listTools } from '../api/platform.js'
+import { uploadDocument } from '../api/documents.js'
 
 const TOOL_GUIDES = {
   semantic_search: {
@@ -60,9 +61,11 @@ export default function ToolPlaygroundPage() {
   const [input, setInput] = useState(STARTER_PROMPTS[0])
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const fileInput = useRef(null)
 
   useEffect(() => {
-    listTools().then(d => setTools(d.tools || [])).catch(() => {})
+    listTools().then((d) => setTools(d.tools || [])).catch(() => {})
   }, [])
 
   const visibleGuides = useMemo(
@@ -86,30 +89,46 @@ export default function ToolPlaygroundPage() {
     }
   }
 
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const res = await uploadDocument(file)
+      toast.success(`${res.filename} uploaded for semantic search`)
+      setInput((prev) => `${prev}${prev ? '\n\n' : ''}Use the uploaded document ${res.filename} in the next tool step.`)
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
   return (
-    <div className="p-8 max-w-[1500px]">
-      <div className="grid xl:grid-cols-[0.95fr_1.35fr] gap-5">
-        <section className="space-y-4">
-          <div className="rounded-[28px] border border-line bg-panel/70 p-5 shadow-2xl shadow-black/15">
+    <div className="p-8 h-full min-h-0 max-w-[1540px]">
+      <div className="grid xl:grid-cols-[0.92fr_1.38fr] gap-5 h-full min-h-0">
+        <section className="min-h-0 overflow-y-auto pr-1 space-y-4">
+          <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles size={16} className="text-accent" />
               <div className="font-display text-lg">Enterprise Tool Guide</div>
             </div>
             <div className="text-sm text-muted leading-relaxed">
-              Ask in plain English, or force a specific tool when you need deterministic inspection. Each card below tells the user what input to give and what result shape to expect.
+              Ask in plain English, or force a specific tool when you need deterministic inspection. Each card tells operators what input to give and what result shape to expect.
             </div>
             <div className="mt-5">
               <label className="text-[11px] uppercase tracking-widest text-muted block mb-2">Preferred tool</label>
-              <select value={preferredTool} onChange={(e) => setPreferredTool(e.target.value)} className="w-full rounded-xl border border-line bg-elev/50 px-3 py-2.5 text-sm outline-none focus:border-accent/40">
+              <select value={preferredTool} onChange={(e) => setPreferredTool(e.target.value)} className="glass-select w-full px-4 py-2.5 text-sm outline-none focus:border-accent/40">
                 <option value="">Auto-select best tool</option>
-                {tools.map(tool => <option key={tool} value={tool}>{tool}</option>)}
+                {tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}
               </select>
             </div>
           </div>
 
           <div className="grid gap-3">
             {visibleGuides.map(({ key, icon: Icon, title, purpose, input: guideInput, output, example }) => (
-              <div key={key} className="rounded-[24px] border border-line bg-panel/60 p-4 shadow-xl shadow-black/10">
+              <div key={key} className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.14)]">
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-9 h-9 rounded-xl border border-accent/30 bg-accent/10 flex items-center justify-center">
                     <Icon size={16} className="text-accent" />
@@ -123,7 +142,7 @@ export default function ToolPlaygroundPage() {
                   <div><span className="text-ink font-medium">Use when:</span> {purpose}</div>
                   <div><span className="text-ink font-medium">Input:</span> {guideInput}</div>
                   <div><span className="text-ink font-medium">Output:</span> {output}</div>
-                  <button onClick={() => setInput(example)} className="w-full rounded-xl border border-line bg-elev/50 px-3 py-2 text-left text-[12px] text-ink hover:border-accent/40">
+                  <button onClick={() => setInput(example)} className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-left text-[12px] text-ink hover:border-accent/40">
                     Example prompt: {example}
                   </button>
                 </div>
@@ -131,14 +150,14 @@ export default function ToolPlaygroundPage() {
             ))}
           </div>
 
-          <div className="rounded-[28px] border border-line bg-panel/60 p-5 shadow-2xl shadow-black/10">
+          <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.14)]">
             <div className="flex items-center gap-2 mb-3">
               <Wrench size={16} className="text-accent2" />
               <div className="font-display text-lg">Quick starters</div>
             </div>
             <div className="grid gap-2">
               {STARTER_PROMPTS.map((prompt) => (
-                <button key={prompt} onClick={() => submit(prompt)} className="rounded-xl border border-line bg-elev/40 px-3 py-2 text-left text-sm hover:border-accent/40">
+                <button key={prompt} onClick={() => submit(prompt)} className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-left text-sm hover:border-accent/40">
                   {prompt}
                 </button>
               ))}
@@ -146,41 +165,41 @@ export default function ToolPlaygroundPage() {
           </div>
         </section>
 
-        <section className="rounded-[30px] border border-line bg-panel/70 flex flex-col min-h-[760px] shadow-2xl shadow-black/15 overflow-hidden">
-          <div className="px-6 py-5 border-b border-line bg-gradient-to-r from-accent/10 via-transparent to-accent2/10">
+        <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] flex flex-col h-full min-h-0 shadow-[0_24px_80px_rgba(0,0,0,0.18)] overflow-hidden">
+          <div className="px-6 py-5 border-b border-white/10 bg-gradient-to-r from-accent/10 via-transparent to-accent2/10">
             <div className="flex items-center gap-2">
               <Bot size={18} className="text-accent" />
               <div className="font-display text-xl">MCP Tool Chat</div>
             </div>
             <div className="text-[12px] text-muted mt-1">
-              Use this like a production operator console: ask, inspect tool outputs, and validate what the platform tools are doing before wiring them into agents or workflows.
+              Use this like a production operator console: ask, inspect tool outputs, and validate platform tool behavior before wiring tools into agents or workflows.
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-[radial-gradient(circle_at_top,_rgba(31,111,235,0.08),_transparent_35%)]">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 bg-[radial-gradient(circle_at_top,_rgba(0,213,255,0.08),_transparent_30%)]">
             {messages.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-line bg-elev/30 p-6 text-sm text-muted">
-                Start by selecting a tool or using one of the guided prompts. This chat will show both the assistant explanation and the raw tool payload returned by the backend.
+              <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-6 text-sm text-muted">
+                Start by selecting a tool or using one of the guided prompts. This chat shows both the assistant explanation and the raw tool payload returned by the backend.
               </div>
             )}
             {messages.map((msg, idx) => (
-              <div key={idx} className={`rounded-2xl border p-4 ${msg.role === 'user' ? 'border-accent/30 bg-accent/10 ml-14' : 'border-line bg-elev/40 mr-14'}`}>
+              <div key={idx} className={`rounded-2xl border p-4 ${msg.role === 'user' ? 'border-accent/30 bg-accent/10 ml-14' : 'border-white/10 bg-white/5 mr-14'}`}>
                 <div className="text-[11px] uppercase tracking-widest text-muted mb-2">{msg.role === 'user' ? 'Operator' : 'Tool assistant'}</div>
                 <div className="text-sm whitespace-pre-wrap leading-6">{msg.content}</div>
                 {msg.tool_results?.length > 0 && (
                   <div className="mt-4 space-y-3">
                     {msg.tool_results.map((item, toolIdx) => (
-                      <div key={`${item.tool}-${toolIdx}`} className="rounded-xl border border-line bg-panel/70 overflow-hidden">
-                        <div className="px-3 py-2 border-b border-line text-[11px] font-mono text-accent flex items-center justify-between">
+                      <div key={`${item.tool}-${toolIdx}`} className="rounded-xl border border-white/10 bg-[#0b1120]/75 overflow-hidden">
+                        <div className="px-3 py-2 border-b border-white/10 text-[11px] font-mono text-accent flex items-center justify-between">
                           <span>{item.tool}</span>
                           <span>{Object.keys(item.args || {}).length} args</span>
                         </div>
-                        <div className="grid md:grid-cols-2 gap-px bg-line">
-                          <div className="bg-elev/40 p-3">
+                        <div className="grid md:grid-cols-2 gap-px bg-white/10">
+                          <div className="bg-white/5 p-3">
                             <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Input sent</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-all">{JSON.stringify(item.args, null, 2)}</pre>
                           </div>
-                          <div className="bg-elev/40 p-3">
+                          <div className="bg-white/5 p-3">
                             <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Output received</div>
                             <pre className="text-[11px] whitespace-pre-wrap break-all">{JSON.stringify(item.result, null, 2)}</pre>
                           </div>
@@ -193,12 +212,18 @@ export default function ToolPlaygroundPage() {
             ))}
           </div>
 
-          <div className="p-4 border-t border-line bg-panel/80">
+          <div className="p-4 border-t border-white/10 bg-[#0b1120]/85">
+            <input ref={fileInput} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={handleUpload} />
             <div className="flex items-end gap-3">
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={4} placeholder="Ask a tool to search policies, score risk, validate clauses, or inspect stored records..." className="flex-1 rounded-2xl border border-line bg-elev/50 px-4 py-3 text-sm outline-none focus:border-accent/40 resize-none" />
-              <button disabled={busy} onClick={() => submit()} className="rounded-2xl bg-accent text-white px-5 py-3.5 text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 disabled:opacity-50">
-                <Send size={14} /> {busy ? 'Running...' : 'Send'}
-              </button>
+              <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={4} placeholder="Ask a tool to search policies, score risk, validate clauses, or inspect stored records..." className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-accent/40 resize-none" />
+              <div className="flex flex-col gap-2">
+                <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-muted hover:text-ink disabled:opacity-50">
+                  {uploading ? <Paperclip size={14} /> : <Upload size={14} />} {uploading ? 'Uploading...' : 'Upload'}
+                </button>
+                <button disabled={busy} onClick={() => submit()} className="rounded-full bg-accent text-white px-5 py-3 text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 disabled:opacity-50">
+                  <Send size={14} /> {busy ? 'Running...' : 'Send'}
+                </button>
+              </div>
             </div>
           </div>
         </section>

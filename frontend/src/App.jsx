@@ -63,7 +63,14 @@ export default function App() {
         theme="dark"
         position="bottom-right"
         toastOptions={{
-          style: { background: '#161623', border: '1px solid #1f1f33', color: '#e9e9f7' },
+          style: {
+            background: 'linear-gradient(180deg, rgba(15,19,36,0.96), rgba(10,12,24,0.96))',
+            border: '1px solid rgba(255,255,255,0.12)',
+            color: '#e9e9f7',
+            borderRadius: '18px',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 18px 60px rgba(0,0,0,0.28)',
+          },
         }}
       />
     </>

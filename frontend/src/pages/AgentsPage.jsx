@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Code2, Cpu, Download, Eye, Plus, Trash2, Workflow as WfIcon, X } from 'lucide-react'
 import { toast } from 'sonner'
+import ConfirmDialog from '../components/common/ConfirmDialog.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import { deleteAgent, exportAgentCode, listAgents, listModels, listTools, registerAgent } from '../api/platform.js'
 
@@ -20,13 +21,14 @@ export default function AgentsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', framework: 'langgraph', description: '', system_prompt: '', model_name: 'gpt-4o', tools: [], hitl_enabled: false })
   const [codeModal, setCodeModal] = useState({ open: false, agent: null, framework: 'langgraph', content: '' })
+  const [deleteTarget, setDeleteTarget] = useState(null)
 
   const load = () => listAgents().then(d => setAgents(d.agents || []))
   useEffect(() => { load(); listTools().then(d => setTools(d.tools || [])); listModels().then(d => setModels(d.models || [])) }, [])
 
-  const remove = async (id) => {
-    if (!confirm('Deactivate this agent?')) return
-    try { await deleteAgent(id); toast.success('Agent removed'); load() } catch { toast.error('Failed') }
+  const remove = async () => {
+    if (!deleteTarget) return
+    try { await deleteAgent(deleteTarget); toast.success('Agent removed'); setDeleteTarget(null); load() } catch { toast.error('Failed') }
   }
 
   const create = async () => {
@@ -97,7 +99,7 @@ export default function AgentsPage() {
                   <div className="text-[11px] font-mono text-muted truncate">{a.model_name || 'gpt-4o'}</div>
                 </div>
               </div>
-              <button onClick={() => remove(a.agent_id)} className="text-muted hover:text-bad p-1" data-testid={`delete-agent-${a.agent_id}`}><Trash2 size={14} /></button>
+              <button onClick={() => setDeleteTarget(a.agent_id)} className="text-muted hover:text-bad p-1" data-testid={`delete-agent-${a.agent_id}`}><Trash2 size={14} /></button>
             </div>
             <p className="text-[12px] text-muted leading-relaxed line-clamp-2 mb-3 min-h-[34px]">{a.description || 'No description.'}</p>
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -128,7 +130,7 @@ export default function AgentsPage() {
               </div>
               <div>
                 <label className="text-[11px] uppercase tracking-widest text-muted block mb-1">Framework</label>
-                <select value={form.framework} onChange={e => setForm(f => ({ ...f, framework: e.target.value }))} className="w-full bg-elev border border-line rounded-md px-3 py-2 text-sm focus:border-accent outline-none">
+                <select value={form.framework} onChange={e => setForm(f => ({ ...f, framework: e.target.value }))} className="glass-select w-full px-3 py-2 text-sm focus:border-accent outline-none">
                   <option value="langgraph">LangGraph</option>
                   <option value="crewai">CrewAI</option>
                   <option value="langchain">LangChain</option>
@@ -137,7 +139,7 @@ export default function AgentsPage() {
               </div>
               <div className="md:col-span-2">
                 <label className="text-[11px] uppercase tracking-widest text-muted block mb-1">Model</label>
-                <select value={form.model_name} onChange={e => setForm(f => ({ ...f, model_name: e.target.value }))} className="w-full bg-elev border border-line rounded-md px-3 py-2 text-sm focus:border-accent outline-none">
+                <select value={form.model_name} onChange={e => setForm(f => ({ ...f, model_name: e.target.value }))} className="glass-select w-full px-3 py-2 text-sm focus:border-accent outline-none">
                   {models.map(model => <option key={model} value={model}>{model}</option>)}
                 </select>
               </div>
@@ -199,6 +201,15 @@ export default function AgentsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={remove}
+        title="Deactivate this agent?"
+        description="The agent will stop appearing in active workflow libraries, but historical runs will keep their trace records."
+        confirmLabel="Deactivate agent"
+      />
     </div>
   )
 }

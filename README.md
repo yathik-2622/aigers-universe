@@ -3,7 +3,7 @@
 > Enterprise AI Engineering & Agentic Orchestration Platform.
 > Bring any agent. Orchestrate every workflow. Watch every token.
 
-A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewAI / LangChain), composing them into multi-agent workflows on a visual ReactFlow canvas, connecting them via **MCP** + **A2A**, gating them via **HITL**, and observing everything in real time.
+A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewAI / LangChain / Agno), composing them into multi-agent workflows on a visual ReactFlow canvas, connecting them via **MCP** + **A2A**, gating them via **HITL**, and observing everything in real time.
 
 ## What's New
 
@@ -11,10 +11,12 @@ A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewA
 - Projects workspace for grouping related workflows.
 - Project member sharing and shared workflow visibility by project.
 - Agent code export for LangGraph, LangChain, CrewAI, Agno, and Langflow-style JSON.
+- Framework-native runtime runners for LangGraph, LangChain, CrewAI, and Agno-style agents instead of one raw custom chat loop.
 - Tool Playground for chat-style interaction with MCP tools, inspired by Langflow's Playground/Projects concepts.
 - Policy-aware workflow builder with custom policy creation and policy document upload.
 - Per-user marketplace installed state.
 - Admin-side project deletion from the control tower.
+- In-app document preview modals and more operator-friendly toast/modal interactions.
 - Agent model selection from the gateway model catalog.
 - Mongo-backed workflow resume after interruption or backend restart.
 

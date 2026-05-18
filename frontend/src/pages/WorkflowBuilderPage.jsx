@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Save, Play, Upload, FileText, Cpu, ShieldPlus, Briefcase } from 'lucide-react'
+import { Save, Play, Upload, FileText, Cpu, ShieldPlus, Briefcase, Eye } from 'lucide-react'
 import { ReactFlowProvider } from 'reactflow'
 import { toast } from 'sonner'
 import { createPolicy, listPolicies } from '../api/policies.js'
@@ -9,6 +9,7 @@ import { listAgents } from '../api/platform.js'
 import { uploadDocument, listDocuments } from '../api/documents.js'
 import { createWorkflow, getWorkflow, runWorkflow } from '../api/workflows.js'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
+import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
 import { getCurrentProjectId, setCurrentProjectId } from '../lib/projectStorage.js'
 
@@ -28,6 +29,7 @@ export default function WorkflowBuilderPage() {
   const [name, setName] = useState('Untitled workflow')
   const [savedId, setSavedId] = useState(workflowId || null)
   const [policyForm, setPolicyForm] = useState({ rule_name: '', category: 'compliance', severity: 'HIGH', description: '', guidance: '' })
+  const [activeDocumentId, setActiveDocumentId] = useState('')
   const fileInput = useRef(null)
 
   const refresh = async () => {
@@ -167,7 +169,7 @@ export default function WorkflowBuilderPage() {
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Project</div>
         <div className="rounded-xl border border-line bg-elev/40 px-3 py-3 mb-6">
           <div className="flex items-center gap-2 text-sm mb-2"><Briefcase size={14} className="text-accent" /> Project scope</div>
-          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setCurrentProjectId(e.target.value) }} className="w-full rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40">
+          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setCurrentProjectId(e.target.value) }} className="glass-select w-full px-3 py-2 text-sm outline-none focus:border-accent/40">
             <option value="">No project</option>
             {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
           </select>
@@ -181,11 +183,16 @@ export default function WorkflowBuilderPage() {
         {docs.length > 0 && (
           <div className="mt-3 space-y-1">
             {docs.slice(0, 6).map(d => (
-              <button key={d.document_id} onClick={() => setSelectedDocId(d.document_id)} data-testid={`doc-select-${d.document_id}`} className={`w-full text-left px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 truncate ${selectedDocId === d.document_id ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-elev/40 text-muted hover:border-accent/30'}`}>
-                <FileText size={12} />
-                <span className="truncate flex-1">{d.filename}</span>
-                <span className="text-[10px] font-mono">{d.chunk_count}c</span>
-              </button>
+              <div key={d.document_id} className={`w-full px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 ${selectedDocId === d.document_id ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-elev/40 text-muted hover:border-accent/30'}`}>
+                <button onClick={() => setSelectedDocId(d.document_id)} data-testid={`doc-select-${d.document_id}`} className="flex items-center gap-2 truncate flex-1 text-left">
+                  <FileText size={12} />
+                  <span className="truncate flex-1">{d.filename}</span>
+                  <span className="text-[10px] font-mono">{d.chunk_count}c</span>
+                </button>
+                <button onClick={() => setActiveDocumentId(d.document_id)} className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 p-1.5 text-muted hover:text-ink">
+                  <Eye size={12} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -210,7 +217,7 @@ export default function WorkflowBuilderPage() {
             <input value={policyForm.rule_name} onChange={(e) => setPolicyForm(f => ({ ...f, rule_name: e.target.value }))} placeholder="Policy name" className="w-full rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40" />
             <div className="grid grid-cols-2 gap-2">
               <input value={policyForm.category} onChange={(e) => setPolicyForm(f => ({ ...f, category: e.target.value }))} placeholder="Category" className="rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40" />
-              <select value={policyForm.severity} onChange={(e) => setPolicyForm(f => ({ ...f, severity: e.target.value }))} className="rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40">
+              <select value={policyForm.severity} onChange={(e) => setPolicyForm(f => ({ ...f, severity: e.target.value }))} className="glass-select px-3 py-2 text-sm outline-none focus:border-accent/40">
                 <option>HIGH</option>
                 <option>MEDIUM</option>
                 <option>LOW</option>
@@ -263,6 +270,7 @@ export default function WorkflowBuilderPage() {
           <WorkflowCanvas initialNodes={nodes} initialEdges={edges} onChange={(n, e) => { setNodes(n); setEdges(e) }} />
         </ReactFlowProvider>
       </div>
+      <DocumentViewerModal documentId={activeDocumentId} open={!!activeDocumentId} onClose={() => setActiveDocumentId('')} />
     </div>
   )
 }

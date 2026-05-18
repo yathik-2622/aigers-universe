@@ -10,7 +10,7 @@ This guide takes you from cold start to a fully observable multi-agent run. On y
 ## What is AIger's Universe?
 
 A generic, domain-agnostic platform that lets you:
-- **Register** any AI agent (LangGraph / CrewAI / LangChain) with a name, framework, system prompt, and tool allow-list.
+- **Register** any AI agent (LangGraph / CrewAI / LangChain / Agno) with a name, framework, system prompt, and tool allow-list.
 - **Compose** multi-agent workflows visually on a **ReactFlow drag-and-drop canvas**.
 - **Connect** agents to platform tools via **MCP** (Model Context Protocol).
 - **Communicate** between agents via **A2A** — every message is persisted as an audit trail.
@@ -431,6 +431,7 @@ Click the run id to jump back into the live run page.
 - The workflow builder stores the selected `project_id` with the workflow definition so future runs stay associated with the same workspace.
 - Project owners can edit member emails from the Projects page, and invited users gain shared access to project workflows and runs.
 - Admin users can delete projects from the Admin View when cleanup is required; workflows and runs are detached instead of destroyed.
+- Dashboard and Builder now let users open uploaded documents in a rich preview modal so extracted content can be reviewed without leaving the platform.
 
 ## Tool Playground And Policy Uploads
 
@@ -440,6 +441,7 @@ Click the run id to jump back into the live run page.
 - If an agent should use policy text directly, enable the `policy_library_search` tool on that agent in Agents or the node config panel.
 - Each tool card now explains when to use the tool, what input to provide, what output to expect, and offers example prompts for operators.
 - The Agents page can export each registered agent as LangGraph, LangChain, CrewAI, Agno, or Langflow-style code/JSON for review and download.
+- The chat pane in Tool Playground stays fixed while the tool guide column scrolls, and the chat composer can upload documents for search-oriented tool workflows.
 - **MCP** — Model Context Protocol. Open spec for exposing tools to LLM agents. We use `fastmcp` + `fastapi-mcp`.
 - **A2A** — Agent-to-Agent. Google's open spec for inter-agent messaging. We use `python-a2a` for descriptors + Mongo for the message bus.
 - **LangGraph** — Stateful graph orchestration over LangChain. We use it for the workflow chain + `interrupt()`/`Command` HITL resume.
