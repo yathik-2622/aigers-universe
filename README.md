@@ -84,11 +84,13 @@ For a full manual and platform-assisted end-to-end validation plan, read **[E2E_
 
 ## Tech stack
 
-**Backend**: FastAPI · Motor (async MongoDB) · `fastmcp` (MCP) · `fastapi-mcp` (mount `/mcp`) · `python-a2a` · `langgraph` + `InMemorySaver` · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · `faiss-cpu` · `PyMuPDF` + `python-docx` · `structlog`.
+**Backend**: FastAPI · Python · Motor (async MongoDB) · `fastmcp` · `fastapi-mcp` · `python-a2a` · `langgraph` · `langchain` · `CrewAI` · `Agno` · MCP Protocol · A2A Protocol · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · `faiss-cpu` · `PyMuPDF` · `python-docx` · `structlog` · JWT Auth · SSE Streaming.
 
-**Frontend**: Vite · React 18 · React Router 6 (v7 future flags on) · `reactflow` · `recharts` · `tailwindcss` (dark enterprise theme) · `lucide-react` · `sonner`.
+**Frontend**: Vite · React 18 · React Router 6 · `reactflow` · `recharts` · `tailwindcss` · `lucide-react` · `sonner` · Enterprise dark-theme workflow canvas UI.
 
-**Storage**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `governance_rules`, `marketplace_templates`) + FAISS (`IndexFlatL2`, disk-persisted for KB only; workflow inputs stay DB-backed and run-scoped).
+**AI / Orchestration**: Multi-Agent Workflows · Agentic AI · Workflow Orchestration · Framework-native Agent Runtime Execution · MCP Tooling · A2A Agent Communication · HITL (Human-in-the-Loop) · Workflow Auto-Planning · Observability & Tracing · AI Governance.
+
+**Storage & Retrieval**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `governance_rules`, `marketplace_templates`) · FAISS (`IndexFlatL2`, disk-persisted vector search for reusable KB context) · Run-scoped workflow inputs persisted separately in MongoDB.
 
 ---
 
