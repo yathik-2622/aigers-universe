@@ -5,12 +5,15 @@ import { useTitle } from '../../context/TitleContext.jsx'
 
 const TITLES = {
   '/dashboard': { title: 'Mission Control', subtitle: 'Live state of every agent, workflow, and approval.' },
+  '/projects': { title: 'Projects', subtitle: 'Organize team workflows by workspace and ownership.' },
   '/marketplace': { title: 'Agent Marketplace', subtitle: 'Install review agents and compose your workflow stack.' },
   '/agents': { title: 'Registered Agents', subtitle: 'Configure system prompts, tools, and HITL gates.' },
   '/builder': { title: 'Workflow Builder', subtitle: 'Attach policies, upload documents, save, and run.' },
+  '/tools-chat': { title: 'Tool Playground', subtitle: 'Interact with MCP tools through a chat-style playground.' },
   '/runs': { title: 'Workflow Run', subtitle: 'Live execution, resumable steps, and readable reports.' },
   '/hitl': { title: 'Human-in-the-Loop', subtitle: 'Review and approve paused workflows.' },
   '/observability': { title: 'Observability', subtitle: 'Traces, tokens, latency, and cost across all runs.' },
+  '/admin': { title: 'Admin Control Tower', subtitle: 'Global visibility across users, projects, and workflow operations.' },
 }
 
 export default function Header() {

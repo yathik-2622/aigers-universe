@@ -20,8 +20,9 @@ class InstallTemplateRequest(BaseModel):
 
 
 @router.get("/templates")
-async def list_templates(search: str | None = Query(default=None)):
+async def list_templates(request: Request, search: str | None = Query(default=None)):
     db = get_db()
+    user_id = get_optional_user_id(request)
     query: dict = {}
     if search:
         query["$or"] = [
@@ -29,6 +30,16 @@ async def list_templates(search: str | None = Query(default=None)):
             {"description": {"$regex": search, "$options": "i"}},
         ]
     templates = await db.marketplace_templates.find(query, {"_id": 0}).to_list(100)
+    if user_id:
+        installed = await db.agents.find({"owner_user_id": user_id, "status": "active", "template_id": {"$exists": True}}, {"_id": 0, "template_id": 1, "agent_id": 1}).to_list(500)
+        installed_map = {row["template_id"]: row["agent_id"] for row in installed}
+        for tpl in templates:
+            tpl["installed"] = tpl["template_id"] in installed_map
+            tpl["installed_agent_id"] = installed_map.get(tpl["template_id"])
+    else:
+        for tpl in templates:
+            tpl["installed"] = False
+            tpl["installed_agent_id"] = None
     return {"templates": templates, "count": len(templates)}
 
 
@@ -71,6 +82,7 @@ async def install_template(template_id: str, request: Request, body: InstallTemp
         "framework": tpl["framework"],
         "description": tpl["description"],
         "system_prompt": body.custom_system_prompt or tpl["default_system_prompt"],
+        "model_name": tpl.get("default_model_name", "gpt-4o"),
         "tools": tpl.get("suggested_tools", []),
         "hitl_enabled": tpl.get("hitl_enabled", False),
         "template_id": template_id,

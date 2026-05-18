@@ -22,6 +22,9 @@ from api.marketplace_router import router as marketplace_router
 from api.document_router import router as document_router
 from api.auth_router import router as auth_router
 from api.policy_router import router as policy_router
+from api.project_router import router as project_router
+from api.admin_router import router as admin_router
+from api.tool_chat_router import router as tool_chat_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -75,6 +78,9 @@ app.include_router(marketplace_router, prefix="/api/marketplace", tags=["Marketp
 app.include_router(document_router, prefix="/api/documents", tags=["Documents"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(policy_router, prefix="/api/policies", tags=["Policies"])
+app.include_router(project_router, prefix="/api/projects", tags=["Projects"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+app.include_router(tool_chat_router, prefix="/api/tool-chat", tags=["Tool Chat"])
 
 
 # Mount FastApiMCP — exposes /mcp endpoint with all registered tools

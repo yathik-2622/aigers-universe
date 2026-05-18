@@ -10,12 +10,12 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   try {
-    const raw = localStorage.getItem('aigers.user')
+    const raw = localStorage.getItem('aigers.auth')
     if (raw) {
-      const user = JSON.parse(raw)
-      if (user?.user_id) {
+      const auth = JSON.parse(raw)
+      if (auth?.access_token) {
         config.headers = config.headers || {}
-        config.headers['X-User-Id'] = user.user_id
+        config.headers.Authorization = `Bearer ${auth.access_token}`
       }
     }
   } catch {}

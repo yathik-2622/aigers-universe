@@ -22,6 +22,7 @@ router = APIRouter()
 class CreateWorkflowRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str = Field(default="")
+    project_id: str | None = Field(default=None)
     agents: list[str] = Field(..., description="Ordered list of agent_ids")
     input_type: str = Field(default="document")
     policy_ids: list[str] = Field(default_factory=list)
@@ -55,12 +56,14 @@ async def create_workflow(request: Request, body: CreateWorkflowRequest):
 
 
 @router.get("")
-async def list_workflows(request: Request):
+async def list_workflows(request: Request, project_id: str | None = None):
     db = get_db()
     query = {}
     user_id = get_optional_user_id(request)
     if user_id:
         query["owner_user_id"] = user_id
+    if project_id:
+        query["project_id"] = project_id
     workflows = await db.workflow_definitions.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"workflows": workflows, "count": len(workflows)}
 

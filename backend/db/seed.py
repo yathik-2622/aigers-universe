@@ -3,6 +3,7 @@ Seed marketplace templates and governance rules at startup.
 Idempotent — uses upsert keyed by template_id / rule_id.
 """
 import structlog
+from config import settings
 from db.mongo_client import get_db
 
 logger = structlog.get_logger(__name__)
@@ -61,12 +62,13 @@ MARKETPLACE_TEMPLATES = [
         "default_system_prompt": (
             "You are a compliance officer. Use the rules_engine_check tool to validate the content. "
             "If selected policy IDs are present in the input, use them when checking compliance. "
+            "Use the policy_library_search tool when you need policy-specific clauses or uploaded policy text. "
             "Identify policy violations, PII that should be redacted, and concrete remediation guidance. "
             "If any HIGH severity rule is violated, call trigger_hitl with severity=HIGH and a clear reason. "
             "Return JSON: {\"compliance_status\": \"PASS\"|\"FAIL\"|\"REVIEW\", \"violations\": [...], "
             "\"pii_findings\": [...], \"redlines\": [...], \"recommended_fixes\": [...]}."
         ),
-        "suggested_tools": ["rules_engine_check", "trigger_hitl"],
+        "suggested_tools": ["rules_engine_check", "policy_library_search", "trigger_hitl"],
         "hitl_enabled": True,
         "category": "Compliance",
         "icon": "ShieldCheck",
@@ -137,6 +139,7 @@ async def run_seed() -> None:
     db = get_db()
 
     for tpl in MARKETPLACE_TEMPLATES:
+        tpl["default_model_name"] = settings.LLM_MODEL
         await db.marketplace_templates.update_one(
             {"template_id": tpl["template_id"]},
             {"$set": tpl},

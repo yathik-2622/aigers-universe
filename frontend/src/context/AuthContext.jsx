@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { getMe, login as loginApi } from '../api/auth.js'
+import { getMe, login as loginApi, logout as logoutApi } from '../api/auth.js'
 
-const STORAGE_KEY = 'aigers.user'
+const STORAGE_KEY = 'aigers.auth'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
+  const [auth, setAuth] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') } catch { return null }
   })
   const [ready, setReady] = useState(false)
@@ -13,37 +13,42 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
     const hydrate = async () => {
-      if (!user?.user_id) {
+      if (!auth?.access_token) {
         if (mounted) setReady(true)
         return
       }
       try {
-        const fresh = await getMe()
-        if (mounted) setUser(fresh)
+        const freshUser = await getMe()
+        if (mounted) {
+          const next = { ...auth, user: freshUser }
+          setAuth(next)
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        }
       } catch {
         try { localStorage.removeItem(STORAGE_KEY) } catch {}
-        if (mounted) setUser(null)
+        if (mounted) setAuth(null)
       } finally {
         if (mounted) setReady(true)
       }
     }
     hydrate()
     return () => { mounted = false }
-  }, [user?.user_id])
+  }, [auth?.access_token])
 
   const login = async (payload) => {
     const fresh = await loginApi(payload)
-    setUser(fresh)
+    setAuth(fresh)
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh)) } catch {}
     return fresh
   }
 
-  const logout = () => {
-    setUser(null)
+  const logout = async () => {
+    try { await logoutApi() } catch {}
+    setAuth(null)
     try { localStorage.removeItem(STORAGE_KEY) } catch {}
   }
 
-  return <AuthContext.Provider value={{ user, ready, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user: auth?.user || null, token: auth?.access_token || null, ready, login, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

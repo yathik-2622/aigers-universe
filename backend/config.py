@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = Field(default="*")
     LOG_LEVEL: str = Field(default="INFO")
     LOG_JSON_FORMAT: bool = Field(default=False)
+    JWT_SECRET: str = Field(default="change-me-super-secret")
+    JWT_EXPIRES_HOURS: int = Field(default=12)
+    ADMIN_EMAILS: str = Field(default="")
 
     # FAISS vector store
     FAISS_INDEX_PATH: str = Field(default="/app/backend/vectorstore/data/faiss_index")

@@ -12,6 +12,9 @@ import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import MarketplacePage from './pages/MarketplacePage.jsx'
 import ObservabilityPage from './pages/ObservabilityPage.jsx'
+import ProjectsPage from './pages/ProjectsPage.jsx'
+import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
 
@@ -29,13 +32,16 @@ function ProtectedShell() {
           <main className="flex-1 min-h-0 overflow-y-auto bg-grid">
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/builder" element={<WorkflowBuilderPage />} />
               <Route path="/builder/:workflowId" element={<WorkflowBuilderPage />} />
+              <Route path="/tools-chat" element={<ToolPlaygroundPage />} />
               <Route path="/runs/:runId" element={<WorkflowRunPage />} />
               <Route path="/hitl" element={<HITLPage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>

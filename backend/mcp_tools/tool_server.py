@@ -99,6 +99,37 @@ async def rules_engine_check_impl(text: str, rule_category: str | None = None, p
         raise ValueError("LLM returned malformed JSON from rules engine check") from exc
 
 
+async def policy_library_search_impl(query: str, policy_ids: list[str] | None = None, limit: int = 5) -> dict:
+    """Search the stored policy library for matching rules or uploaded policy text."""
+    db = get_db()
+    mongo_query: dict = {}
+    if policy_ids:
+        mongo_query["rule_id"] = {"$in": policy_ids}
+    docs = await db.governance_rules.find(mongo_query, {"_id": 0}).to_list(500)
+    q = query.lower().strip()
+    scored = []
+    for doc in docs:
+        haystack = " ".join([
+            doc.get("rule_name", ""),
+            doc.get("description", ""),
+            doc.get("guidance", ""),
+            doc.get("uploaded_text", ""),
+        ]).lower()
+        score = haystack.count(q) if q else 0
+        if q in haystack or not q:
+            scored.append((score, doc))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    matches = [{
+        "rule_id": doc["rule_id"],
+        "rule_name": doc.get("rule_name"),
+        "severity": doc.get("severity"),
+        "category": doc.get("category"),
+        "description": doc.get("description"),
+        "guidance": doc.get("guidance", ""),
+    } for _, doc in scored[: max(1, min(limit, 20))]]
+    return {"matches": matches, "count": len(matches)}
+
+
 async def risk_scorer_impl(text: str, context: str = "") -> dict:
     """Score text for risk level using LLM reasoning."""
     logger.info("tool.risk_scorer.called", text_length=len(text))
@@ -191,6 +222,12 @@ async def risk_scorer(text: str, context: str = "") -> dict:
 
 
 @mcp.tool
+async def policy_library_search(query: str, policy_ids: list[str] | None = None, limit: int = 5) -> dict:
+    """Search uploaded and stored policy rules to support redlining and compliance review."""
+    return await policy_library_search_impl(query=query, policy_ids=policy_ids, limit=limit)
+
+
+@mcp.tool
 async def trigger_hitl(workflow_run_id: str, agent_name: str, reason: str, severity: str, context: dict | None = None) -> dict:
     """Pause workflow execution and create a Human-in-the-Loop approval request."""
     return await trigger_hitl_impl(
@@ -207,6 +244,7 @@ TOOL_REGISTRY = {
     "semantic_search": semantic_search_impl,
     "document_store": document_store_impl,
     "rules_engine_check": rules_engine_check_impl,
+    "policy_library_search": policy_library_search_impl,
     "risk_scorer": risk_scorer_impl,
     "trigger_hitl": trigger_hitl_impl,
 }

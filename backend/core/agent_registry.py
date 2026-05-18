@@ -89,6 +89,22 @@ TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "policy_library_search": {
+        "type": "function",
+        "function": {
+            "name": "policy_library_search",
+            "description": "Search uploaded and stored policy documents for relevant policy guidance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "policy_ids": {"type": "array", "items": {"type": "string"}},
+                    "limit": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
     "trigger_hitl": {
         "type": "function",
         "function": {
@@ -151,6 +167,7 @@ async def invoke_agent_by_id(
     agent_name = agent_config["name"]
     framework = agent_config.get("framework", "langgraph")
     system_prompt = agent_config.get("system_prompt", "")
+    model_name = agent_config.get("model_name") or None
     enabled_tools = agent_config.get("tools", []) or []
     selected_policy_ids = (input_data.get("original_input") or {}).get("policy_ids", [])
 
@@ -190,7 +207,7 @@ async def invoke_agent_by_id(
                 from core.llm_router import _client  # internal access
                 from config import settings as _settings
                 resp = await _client.chat.completions.create(
-                    model=_settings.LLM_MODEL,
+                    model=model_name or _settings.LLM_MODEL,
                     messages=messages,
                     temperature=0.2,
                     tools=tools_payload,
@@ -237,7 +254,7 @@ async def invoke_agent_by_id(
                     })
             else:
                 # No tools — single shot LLM call
-                result = await chat_completion(messages=messages, caller=f"agent.{agent_name}")
+                result = await chat_completion(messages=messages, caller=f"agent.{agent_name}", model=model_name)
                 final_content = result["content"] or ""
                 total_tokens += result["tokens_used"]
                 total_prompt_tokens += result["prompt_tokens"]

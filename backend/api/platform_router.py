@@ -15,6 +15,26 @@ router = APIRouter()
 repo = AgentRepository()
 
 VALID_FRAMEWORKS = {"langgraph", "crewai", "langchain"}
+AVAILABLE_MODELS = [
+    "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-chat",
+    "gpt-5-mini", "gpt-5-nano", "o3", "o3-mini", "o4-mini", "text-embedding-3-large",
+    "text-embedding-3-small", "text-embedding-ada-002", "gpt-image-1.5", "gpt-image-1",
+    "gpt-image-1-mini", "gpt-5.4", "gpt-5.4-pro", "gpt-5.3-codex", "phi-4-mini-reasoning",
+    "phi-4-multimodal-instruct", "phi-4-reasoning", "amazon-nova-lite", "amazon-nova-micro",
+    "amazon-nova-pro", "claude-3.5-haiku", "claude-3.5-sonnet", "claude-3.7-sonnet",
+    "claude-3.7-sonnet-thinking", "claude-haiku-4.5", "claude-opus-4.1", "claude-sonnet-4",
+    "claude-sonnet-4-thinking", "claude-sonnet-4.5", "cohere-rerank-3.5", "gpt-oss-120b",
+    "gpt-oss-20b", "llama-3.1-8b-instruct", "llama-3.2-11b-instruct", "llama-3.2-1b-instruct",
+    "llama-3.2-90b-instruct", "llama-3.3-70b-instruct", "llama-4-maverick-17b-instruct",
+    "llama-4-scout-17b-instruct", "titan-embed-text-v2", "claude-opus-4.5", "minimax-m2",
+    "claude-opus-4.6", "claude-sonnet-4.6", "gemini-2.0-flash", "gemini-2.0-flash-lite",
+    "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-thinking", "gemini-2.5-pro",
+    "gemini-embedding-001", "multimodal-embedding", "text-embedding-005",
+    "text-multilingual-embedding-002", "imagen-4.0-generate-001", "imagen-4.0-ultra-generate-001",
+    "imagen-4.0-fast-generate-001", "gemini-3-flash-preview", "gemini-3-pro-preview",
+    "gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-image-preview",
+]
 
 
 class RegisterAgentRequest(BaseModel):
@@ -22,6 +42,7 @@ class RegisterAgentRequest(BaseModel):
     framework: str = Field(..., description="langgraph | crewai | langchain")
     description: str = Field(default="")
     system_prompt: str = Field(..., min_length=10)
+    model_name: str = Field(default="gpt-4o")
     tools: list[str] = Field(default_factory=list)
     hitl_enabled: bool = Field(default=False)
 
@@ -120,6 +141,11 @@ async def list_available_tools():
     """List all MCP tool names available on the platform."""
     from mcp_tools.tool_server import TOOL_REGISTRY
     return {"tools": list(TOOL_REGISTRY.keys())}
+
+
+@router.get("/models")
+async def list_available_models():
+    return {"models": AVAILABLE_MODELS, "default": "gpt-4o"}
 
 
 

@@ -35,6 +35,8 @@ A generic, domain-agnostic platform that lets you:
 11. [API reference](#api-reference)
 12. [Troubleshooting](#troubleshooting)
 13. [Glossary](#glossary)
+14. [JWT Auth, Projects, And Admin View](#jwt-auth-projects-and-admin-view)
+15. [Tool Playground And Policy Uploads](#tool-playground-and-policy-uploads)
 
 ---
 
@@ -420,6 +422,20 @@ Click the run id to jump back into the live run page.
 ---
 
 ## Glossary
+
+## JWT Auth, Projects, And Admin View
+
+- Sign in from `/login` with your name and work email. The backend now returns a bearer token and uses it to scope documents, agents, workflows, runs, traces, and HITL records.
+- Users whose email appears in `ADMIN_EMAILS` are elevated to the `admin` role and can open `/admin` for full-platform visibility.
+- Use `/projects` to group multiple workflows under a shared project context before saving or running them.
+- The workflow builder stores the selected `project_id` with the workflow definition so future runs stay associated with the same workspace.
+
+## Tool Playground And Policy Uploads
+
+- `/tools-chat` is a chat-style playground for MCP tools, inspired by Langflow's Playground concept.
+- You can let the backend auto-select a tool or force a specific safe tool such as `policy_library_search`, `rules_engine_check`, or `risk_scorer`.
+- In Workflow Builder, policy documents can be uploaded directly. Uploaded policy text is stored in Mongo and can be queried through `policy_library_search`.
+- If an agent should use policy text directly, enable the `policy_library_search` tool on that agent in Agents or the node config panel.
 - **MCP** — Model Context Protocol. Open spec for exposing tools to LLM agents. We use `fastmcp` + `fastapi-mcp`.
 - **A2A** — Agent-to-Agent. Google's open spec for inter-agent messaging. We use `python-a2a` for descriptors + Mongo for the message bus.
 - **LangGraph** — Stateful graph orchestration over LangChain. We use it for the workflow chain + `interrupt()`/`Command` HITL resume.

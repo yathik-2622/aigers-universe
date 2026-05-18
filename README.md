@@ -5,6 +5,16 @@
 
 A generic, domain-agnostic platform for registering AI agents (LangGraph / CrewAI / LangChain), composing them into multi-agent workflows on a visual ReactFlow canvas, connecting them via **MCP** + **A2A**, gating them via **HITL**, and observing everything in real time.
 
+## What's New
+
+- JWT-backed sign-in with user and admin roles.
+- Projects workspace for grouping related workflows.
+- Tool Playground for chat-style interaction with MCP tools, inspired by Langflow's Playground/Projects concepts.
+- Policy-aware workflow builder with custom policy creation and policy document upload.
+- Per-user marketplace installed state.
+- Agent model selection from the gateway model catalog.
+- Mongo-backed workflow resume after interruption or backend restart.
+
 > **Yes — this _is_ a drag-and-drop application.** Open the **Workflow Builder** page and drag agent cards from the left rail onto the ReactFlow canvas to compose pipelines. The drag-and-drop is _specifically_ for orchestrating AI agents (not a general Bubble-style page builder).
 
 For the full end-user walkthrough — concepts, prompts, **screenshots of every page**, best practices, page-by-page reference, API reference, and troubleshooting — read **[USER_GUIDE.md](./USER_GUIDE.md)**.
@@ -273,6 +283,16 @@ VITE_REACT_APP_BACKEND_URL=http://localhost:8001
 - **GitHub push**: use Emergent's **Save to GitHub** button in the chat input, or download the code and push manually (see USER_GUIDE for instructions).
 
 ---
+
+## New APIs
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET /api/projects`
+- `POST /api/projects`
+- `GET /api/admin/overview`
+- `POST /api/tool-chat/message`
+- `POST /api/policies/upload`
+- `GET /api/platform/models`
 
 ## License
 MIT.

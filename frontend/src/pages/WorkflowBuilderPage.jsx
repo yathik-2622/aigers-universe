@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Save, Play, Upload, FileText, Cpu, ShieldPlus } from 'lucide-react'
+import { Save, Play, Upload, FileText, Cpu, ShieldPlus, Briefcase } from 'lucide-react'
 import { ReactFlowProvider } from 'reactflow'
 import { toast } from 'sonner'
 import { createPolicy, listPolicies } from '../api/policies.js'
+import { listProjects } from '../api/projects.js'
 import { listAgents } from '../api/platform.js'
 import { uploadDocument, listDocuments } from '../api/documents.js'
 import { createWorkflow, getWorkflow, runWorkflow } from '../api/workflows.js'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
+import { getCurrentProjectId, setCurrentProjectId } from '../lib/projectStorage.js'
 
 export default function WorkflowBuilderPage() {
   const { workflowId } = useParams()
@@ -16,6 +18,8 @@ export default function WorkflowBuilderPage() {
   const [agents, setAgents] = useState([])
   const [docs, setDocs] = useState([])
   const [policies, setPolicies] = useState([])
+  const [projects, setProjects] = useState([])
+  const [projectId, setProjectId] = useState(getCurrentProjectId())
   const [selectedDocId, setSelectedDocId] = useState(null)
   const [selectedPolicyIds, setSelectedPolicyIds] = useState([])
   const [uploading, setUploading] = useState(false)
@@ -27,10 +31,11 @@ export default function WorkflowBuilderPage() {
   const fileInput = useRef(null)
 
   const refresh = async () => {
-    const [a, d, p] = await Promise.all([listAgents(), listDocuments(), listPolicies()])
+    const [a, d, p, pr] = await Promise.all([listAgents(), listDocuments(), listPolicies(), listProjects()])
     setAgents(a.agents || [])
     setDocs(d.documents || [])
     setPolicies(p.policies || [])
+    setProjects(pr.projects || [])
   }
 
   useEffect(() => {
@@ -40,6 +45,7 @@ export default function WorkflowBuilderPage() {
         setName(wf.name)
         setSavedId(wf.workflow_id)
         setSelectedPolicyIds(wf.policy_ids || [])
+        setProjectId(wf.project_id || getCurrentProjectId())
         if (wf.canvas?.nodes) setNodes(wf.canvas.nodes)
         if (wf.canvas?.edges) setEdges(wf.canvas.edges)
       }).catch(() => {})
@@ -79,6 +85,7 @@ export default function WorkflowBuilderPage() {
       const body = {
         name,
         description: '',
+        project_id: projectId || null,
         agents: orderedAgentIds,
         input_type: 'document',
         policy_ids: selectedPolicyIds,
@@ -157,6 +164,15 @@ export default function WorkflowBuilderPage() {
           ))}
         </div>
 
+        <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Project</div>
+        <div className="rounded-xl border border-line bg-elev/40 px-3 py-3 mb-6">
+          <div className="flex items-center gap-2 text-sm mb-2"><Briefcase size={14} className="text-accent" /> Project scope</div>
+          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setCurrentProjectId(e.target.value) }} className="w-full rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40">
+            <option value="">No project</option>
+            {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
+          </select>
+        </div>
+
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Document input</div>
         <input ref={fileInput} type="file" accept=".pdf,.docx,.txt" onChange={handleUpload} className="hidden" data-testid="doc-upload-input" />
         <button data-testid="doc-upload-btn" onClick={() => fileInput.current?.click()} disabled={uploading} className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-accent/40 text-accent text-sm hover:bg-accent/5 disabled:opacity-50">
@@ -203,6 +219,30 @@ export default function WorkflowBuilderPage() {
             <textarea value={policyForm.description} onChange={(e) => setPolicyForm(f => ({ ...f, description: e.target.value }))} placeholder="What should the workflow enforce?" rows={3} className="w-full rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40" />
             <textarea value={policyForm.guidance} onChange={(e) => setPolicyForm(f => ({ ...f, guidance: e.target.value }))} placeholder="Optional remediation guidance" rows={2} className="w-full rounded-lg border border-line bg-panel/60 px-3 py-2 text-sm outline-none focus:border-accent/40" />
             <button onClick={createCustomPolicy} className="w-full rounded-lg bg-accent text-white text-sm font-medium py-2 hover:opacity-90">Create policy</button>
+            <label className="w-full rounded-lg border border-dashed border-accent/40 text-accent text-sm font-medium py-2 text-center block cursor-pointer hover:bg-accent/5">
+              Upload policy document
+              <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                const formData = new FormData()
+                formData.append('file', file)
+                try {
+                  const baseUrl = import.meta.env.VITE_REACT_APP_BACKEND_URL || ''
+                  const raw = localStorage.getItem('aigers.auth')
+                  const token = raw ? JSON.parse(raw)?.access_token : ''
+                  const resp = await fetch(`${baseUrl}/api/policies/upload`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData })
+                  if (!resp.ok) throw new Error('upload failed')
+                  const res = await resp.json()
+                  setSelectedPolicyIds(ids => ids.includes(res.rule_id) ? ids : [...ids, res.rule_id])
+                  toast.success('Policy uploaded')
+                  refresh()
+                } catch {
+                  toast.error('Policy upload failed')
+                } finally {
+                  e.target.value = ''
+                }
+              }} />
+            </label>
           </div>
         </div>
       </aside>

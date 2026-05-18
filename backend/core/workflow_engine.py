@@ -264,6 +264,7 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
             "run_id": run_id,
             "workflow_id": workflow_id,
             "workflow_name": wf.get("name", ""),
+            "project_id": wf.get("project_id"),
             "input_data": input_data,
             "policy_ids": wf.get("policy_ids", []),
             "owner_user_id": owner_user_id or wf.get("owner_user_id"),

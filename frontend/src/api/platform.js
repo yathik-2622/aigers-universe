@@ -7,6 +7,7 @@ export const updateAgent = (id, body) => api.put(`/platform/agents/${id}`, body)
 export const deleteAgent = (id) => api.delete(`/platform/agents/${id}`).then(r => r.data)
 export const invokeAgent = (id, body) => api.post(`/platform/agents/${id}/invoke`, body).then(r => r.data)
 export const listTools = () => api.get('/platform/tools').then(r => r.data)
+export const listModels = () => api.get('/platform/models').then(r => r.data)
 
 export const listTemplates = (search) => api.get('/marketplace/templates', { params: { search } }).then(r => r.data)
 export const installTemplate = (id, body = {}) => api.post(`/marketplace/templates/${id}/install`, body).then(r => r.data)
