@@ -287,8 +287,8 @@ export default function WorkflowRunPage() {
   const manualStop = async () => {
     setStopPending(true)
     try {
-      await stopRun(runId)
-      toast.success(run?.status === 'paused' ? 'Workflow stopped' : 'Stop requested. Current agent will finish before stopping.')
+      const result = await stopRun(runId)
+      toast.success(result?.cancelled_active_task || run?.status === 'paused' ? 'Workflow stopped' : 'Stop requested')
       setRun(await getRun(runId))
     } catch {
       toast.error('Stop request failed')

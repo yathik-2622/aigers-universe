@@ -5,7 +5,7 @@ credentials.json
 *.pem
 *.key
 .credentials
-
+.crewai_runtime/
 
 # Python
 __pycache__/

@@ -1,6 +1,9 @@
+import asyncio
+import importlib
 import json
 import os
 import time
+from pathlib import Path
 
 import structlog
 from langchain.agents import create_agent
@@ -14,6 +17,79 @@ from config import settings
 from mcp_tools.tool_server import TOOL_REGISTRY
 
 logger = structlog.get_logger(__name__)
+
+
+def _prepare_crewai_runtime_env() -> None:
+    import appdirs
+
+    base_dir = Path(__file__).resolve().parents[1]
+    crewai_root = base_dir / ".crewai_runtime"
+    local_appdata = crewai_root / "localappdata"
+    tmp_dir = crewai_root / "tmp"
+    for path in (crewai_root, local_appdata, tmp_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    os.environ["CREWAI_STORAGE_DIR"] = "aigers_universe_backend"
+    os.environ["CREWAI_TRACING_ENABLED"] = "false"
+    os.environ["CREWAI_TESTING"] = "true"
+    os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+    os.environ["OTEL_SDK_DISABLED"] = "true"
+    os.environ["LOCALAPPDATA"] = str(local_appdata)
+    os.environ["APPDATA"] = str(local_appdata)
+    os.environ["TMP"] = str(tmp_dir)
+    os.environ["TEMP"] = str(tmp_dir)
+
+    def _workspace_user_data_dir(appname=None, appauthor=None, version=None, roaming=False):
+        target = local_appdata / (appname or "aigers_universe_backend")
+        target.mkdir(parents=True, exist_ok=True)
+        return str(target)
+
+    appdirs.user_data_dir = _workspace_user_data_dir
+
+
+def get_framework_runtime_health() -> dict[str, dict]:
+    health: dict[str, dict] = {}
+
+    try:
+        importlib.import_module("langchain.agents")
+        importlib.import_module("langchain_openai")
+        health["langchain"] = {"status": "healthy", "native_available": True, "fallback_available": False}
+    except Exception as exc:
+        health["langchain"] = {"status": "unhealthy", "native_available": False, "fallback_available": False, "error": str(exc)}
+
+    try:
+        importlib.import_module("langgraph.prebuilt")
+        importlib.import_module("langchain_openai")
+        health["langgraph"] = {"status": "healthy", "native_available": True, "fallback_available": False}
+    except Exception as exc:
+        health["langgraph"] = {"status": "unhealthy", "native_available": False, "fallback_available": False, "error": str(exc)}
+
+    try:
+        importlib.import_module("agno.agent")
+        importlib.import_module("agno.models.openai")
+        health["agno"] = {"status": "healthy", "native_available": True, "fallback_available": health["langchain"]["native_available"]}
+    except Exception as exc:
+        health["agno"] = {
+            "status": "degraded" if health["langchain"]["native_available"] else "unhealthy",
+            "native_available": False,
+            "fallback_available": health["langchain"]["native_available"],
+            "error": str(exc),
+        }
+
+    _prepare_crewai_runtime_env()
+    try:
+        importlib.import_module("crewai")
+        importlib.import_module("litellm")
+        health["crewai"] = {"status": "healthy", "native_available": True, "fallback_available": health["langchain"]["native_available"]}
+    except Exception as exc:
+        health["crewai"] = {
+            "status": "degraded" if health["langchain"]["native_available"] else "unhealthy",
+            "native_available": False,
+            "fallback_available": health["langchain"]["native_available"],
+            "error": str(exc),
+        }
+
+    return health
 
 
 def _safe_message_name(value: str) -> str:
@@ -355,11 +431,7 @@ async def _run_crewai(
     workflow_run_id: str,
     selected_policy_ids: list[str],
 ) -> dict:
-    os.environ.setdefault("CREWAI_STORAGE_DIR", "aigers-universe")
-    os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
-    os.environ.setdefault("CREWAI_TESTING", "true")
-    os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
-    os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+    _prepare_crewai_runtime_env()
     try:
         from crewai import Agent, Crew, LLM, Process, Task
         from crewai.tools import tool
@@ -441,6 +513,21 @@ async def _run_agno(
     }
 
 
+def _is_framework_bootstrap_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "litellm",
+            "fallback to litellm",
+            "crewai runtime unavailable",
+            "permissionerror",
+            "access is denied",
+            "agno runtime unavailable",
+        )
+    )
+
+
 async def run_framework_agent(
     agent_config: dict,
     input_data: dict,
@@ -460,15 +547,19 @@ async def run_framework_agent(
     remote_agent_card_url = (agent_config.get("remote_agent_card_url") or "").strip()
 
     logger.info("agent.invoke.start", agent_name=agent_name, framework=framework, step=step_number, model=model_name)
+    step_timeout = max(1, int(settings.AGENT_STEP_TIMEOUT_SECONDS or 300))
 
     try:
         if agent_config.get("a2a_enabled", True) and a2a_mode == "remote" and remote_agent_card_url:
-            remote = await dispatch_remote_agent(
-                agent_card_url=remote_agent_card_url,
-                input_data=input_data,
-                workflow_run_id=workflow_run_id,
-                from_agent=agent_name,
-                message_type="delegation",
+            remote = await asyncio.wait_for(
+                dispatch_remote_agent(
+                    agent_card_url=remote_agent_card_url,
+                    input_data=input_data,
+                    workflow_run_id=workflow_run_id,
+                    from_agent=agent_name,
+                    message_type="delegation",
+                ),
+                timeout=step_timeout,
             )
             remote_result = (remote.get("result") or {}).get("result") or {}
             remote_output = remote_result.get("output", remote_result)
@@ -486,13 +577,43 @@ async def run_framework_agent(
                 "error": remote_result.get("error"),
             }
         if framework == "langchain":
-            raw = await _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids)
+            raw = await asyncio.wait_for(
+                _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                timeout=step_timeout,
+            )
         elif framework == "crewai":
-            raw = await _run_crewai(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids)
+            try:
+                raw = await asyncio.wait_for(
+                    _run_crewai(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    timeout=step_timeout,
+                )
+            except Exception as exc:
+                if not _is_framework_bootstrap_error(exc):
+                    raise
+                logger.warning("agent.invoke.crewai_fallback", agent_name=agent_name, error=str(exc))
+                raw = await asyncio.wait_for(
+                    _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    timeout=step_timeout,
+                )
         elif framework == "agno":
-            raw = await _run_agno(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids)
+            try:
+                raw = await asyncio.wait_for(
+                    _run_agno(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    timeout=step_timeout,
+                )
+            except Exception as exc:
+                if not _is_framework_bootstrap_error(exc):
+                    raise
+                logger.warning("agent.invoke.agno_fallback", agent_name=agent_name, error=str(exc))
+                raw = await asyncio.wait_for(
+                    _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    timeout=step_timeout,
+                )
         else:
-            raw = await _run_langgraph(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids)
+            raw = await asyncio.wait_for(
+                _run_langgraph(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                timeout=step_timeout,
+            )
 
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
         return {
@@ -506,6 +627,22 @@ async def run_framework_agent(
             "tools_called": raw.get("tools_called", []),
             "status": "success",
             "error": None,
+        }
+    except asyncio.TimeoutError:
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        error = f"Agent step exceeded timeout of {step_timeout} seconds"
+        logger.error("agent.invoke.timeout", agent_name=agent_name, framework=framework, step=step_number, timeout_seconds=step_timeout)
+        return {
+            "agent_name": agent_name,
+            "framework": framework,
+            "output": {},
+            "tokens_used": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "latency_ms": latency_ms,
+            "tools_called": [],
+            "status": "failed",
+            "error": error,
         }
     except Exception as exc:
         latency_ms = round((time.perf_counter() - start) * 1000, 2)

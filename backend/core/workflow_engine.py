@@ -20,6 +20,7 @@ from observability.tracer import record_trace
 
 logger = structlog.get_logger(__name__)
 agent_repo = AgentRepository()
+_RUN_TASKS: dict[str, asyncio.Task] = {}
 
 
 class WorkflowState(TypedDict, total=False):
@@ -45,6 +46,26 @@ DEFAULT_INPUT_BINDINGS = {
 
 def _utcnow_iso() -> str:
     return datetime.datetime.utcnow().isoformat()
+
+
+def _track_run_task(run_id: str, task: asyncio.Task) -> None:
+    existing = _RUN_TASKS.get(run_id)
+    if existing and not existing.done():
+        existing.cancel()
+    _RUN_TASKS[run_id] = task
+
+    def _cleanup(_task: asyncio.Task) -> None:
+        if _RUN_TASKS.get(run_id) is _task:
+            _RUN_TASKS.pop(run_id, None)
+    task.add_done_callback(_cleanup)
+
+
+def _cancel_run_task(run_id: str) -> bool:
+    task = _RUN_TASKS.get(run_id)
+    if not task or task.done():
+        return False
+    task.cancel()
+    return True
 
 
 def _parse_iso(value: str | None) -> datetime.datetime | None:
@@ -419,6 +440,20 @@ async def _run_workflow_steps(state: WorkflowState, start_step: int = 0) -> None
                 return
         await _finalize_run(run_id, state)
         logger.info("workflow.run.complete", run_id=run_id)
+    except asyncio.CancelledError:
+        logger.info("workflow.run.cancelled", run_id=run_id)
+        await db.workflow_runs.update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "status": "stopped",
+                    "completed_at": _utcnow_iso(),
+                    "updated_at": _utcnow_iso(),
+                    "failure_reason": None,
+                }
+            },
+        )
+        return
     except Exception as exc:
         logger.error("workflow.run.failed", run_id=run_id, error=str(exc), exc_info=True)
         await db.workflow_runs.update_one(
@@ -536,7 +571,8 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
         "final_output": {},
         "status": "running",
     }
-    asyncio.create_task(_run_workflow_steps(initial_state, start_step=0))
+    task = asyncio.create_task(_run_workflow_steps(initial_state, start_step=0))
+    _track_run_task(run_id, task)
     return run_id
 
 
@@ -594,7 +630,8 @@ async def resume_workflow_run(run_id: str) -> dict:
         "final_output": run.get("final_output", {}),
         "status": "running",
     }
-    asyncio.create_task(_run_workflow_steps(resume_state, start_step=start_step))
+    task = asyncio.create_task(_run_workflow_steps(resume_state, start_step=start_step))
+    _track_run_task(run_id, task)
     return {"run_id": run_id, "status": "running", "resumed_from_step": start_step}
 
 
@@ -620,6 +657,7 @@ async def request_workflow_stop(run_id: str) -> dict:
     if run.get("status") in ("completed", "failed", "stopped"):
         return {"run_id": run_id, "status": run.get("status"), "message": "Run is already terminal"}
 
+    cancelled = _cancel_run_task(run_id)
     update = {
         "$set": {
             "control.stop_requested": True,
@@ -627,7 +665,13 @@ async def request_workflow_stop(run_id: str) -> dict:
             "updated_at": _utcnow_iso(),
         }
     }
-    if run.get("status") == "paused":
+    if run.get("status") == "paused" or cancelled:
         update["$set"].update({"status": "stopped", "hitl_id": None, "completed_at": _utcnow_iso()})
     await db.workflow_runs.update_one({"run_id": run_id}, update)
-    return {"run_id": run_id, "status": "stopped" if run.get("status") == "paused" else run.get("status"), "requested": "stop", "current_step": run.get("current_step", 0)}
+    return {
+        "run_id": run_id,
+        "status": "stopped" if (run.get("status") == "paused" or cancelled) else run.get("status"),
+        "requested": "stop",
+        "current_step": run.get("current_step", 0),
+        "cancelled_active_task": cancelled,
+    }
