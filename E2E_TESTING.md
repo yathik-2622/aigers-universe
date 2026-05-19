@@ -1,5 +1,7 @@
 # AIger's Universe End-to-End Testing Guide
 
+Browser version: [docs/e2e-testing.html](./docs/e2e-testing.html)
+
 ## 1. Purpose
 
 This document covers only end-to-end testing of AIger's Universe across the real platform surfaces:

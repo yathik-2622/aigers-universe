@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ReactFlowProvider } from 'reactflow'
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, FileText, LoaderCircle, MessageSquare, Radio, RefreshCcw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, FileText, LoaderCircle, MessageSquare, PauseCircle, Radio, RefreshCcw, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
-import { getRun, getRunReport, resumeRun } from '../api/workflows.js'
+import { getRun, getRunReport, pauseRun, resumeRun, stopRun } from '../api/workflows.js'
 import { useTitle } from '../context/TitleContext.jsx'
 
 export default function WorkflowRunPage() {
@@ -18,10 +18,36 @@ export default function WorkflowRunPage() {
   const [showReport, setShowReport] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [resuming, setResuming] = useState(false)
+  const [pausePending, setPausePending] = useState(false)
+  const [stopPending, setStopPending] = useState(false)
   const [activeCitation, setActiveCitation] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
   const [expandedMessageId, setExpandedMessageId] = useState('')
   const [focusedNodeId, setFocusedNodeId] = useState('')
+  const [latestA2AMessageId, setLatestA2AMessageId] = useState('')
+  const a2aScrollRef = React.useRef(null)
+  const prevA2ACountRef = React.useRef(0)
+
+  const applyRunState = (incoming) => {
+    setRun((prev) => {
+      const prevMessages = prev?.a2a_messages || []
+      const nextMessages = incoming?.a2a_messages || prevMessages
+      return { ...(prev || {}), ...(incoming || {}), a2a_messages: nextMessages }
+    })
+    const derived = deriveReportFromRun(incoming)
+    if (derived) setReport((prev) => prev || derived)
+  }
+
+  const formatDuration = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) return 'n/a'
+    const totalSeconds = Math.round(ms / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    if (hours) return `${hours}h ${minutes}m`
+    if (minutes) return `${minutes}m ${seconds}s`
+    return `${seconds}s`
+  }
 
   const deriveReportFromRun = (runDoc) => {
     if (!runDoc) return null
@@ -59,9 +85,7 @@ export default function WorkflowRunPage() {
         if (cancelled) return
         try {
           const data = await getRun(runId)
-          setRun(data)
-          const derived = deriveReportFromRun(data)
-          if (derived) setReport((prev) => prev || derived)
+          applyRunState(data)
           if (['completed', 'failed'].includes(data.status)) {
             try {
               setReportLoading(true)
@@ -87,11 +111,40 @@ export default function WorkflowRunPage() {
         if (cancelled) return
         try {
           const data = JSON.parse(ev.data)
-          setRun(data)
-          const derived = deriveReportFromRun(data)
-          if (derived) setReport((prev) => prev || derived)
+          applyRunState(data)
         } catch {}
       }
+      es.addEventListener('run_snapshot', (ev) => {
+        if (cancelled) return
+        try {
+          applyRunState(JSON.parse(ev.data))
+        } catch {}
+      })
+      es.addEventListener('run_update', (ev) => {
+        if (cancelled) return
+        try {
+          applyRunState(JSON.parse(ev.data))
+        } catch {}
+      })
+      es.addEventListener('a2a_message', (ev) => {
+        if (cancelled) return
+        try {
+          const message = JSON.parse(ev.data)
+          setRun((prev) => {
+            if (!prev) return prev
+            const current = prev.a2a_messages || []
+            if (current.some((item) => item.message_id === message.message_id)) return prev
+            return { ...prev, a2a_messages: [...current, message] }
+          })
+        } catch {}
+      })
+      es.addEventListener('a2a_reset', (ev) => {
+        if (cancelled) return
+        try {
+          const messages = JSON.parse(ev.data)
+          setRun((prev) => (prev ? { ...prev, a2a_messages: messages } : prev))
+        } catch {}
+      })
       es.addEventListener('end', async () => {
         if (cancelled) return
         try {
@@ -188,6 +241,23 @@ export default function WorkflowRunPage() {
     }
   }, [run?.status, run?.current_step, nodes.length])
 
+  useEffect(() => {
+    const messages = run?.a2a_messages || []
+    const count = messages.length
+    const previous = prevA2ACountRef.current
+    if (count > previous) {
+      const latest = messages[messages.length - 1]
+      if (latest?.message_id) {
+        setLatestA2AMessageId(latest.message_id)
+        setExpandedMessageId(latest.message_id)
+      }
+      if (a2aScrollRef.current) {
+        a2aScrollRef.current.scrollTop = a2aScrollRef.current.scrollHeight
+      }
+    }
+    prevA2ACountRef.current = count
+  }, [run?.a2a_messages])
+
   const manualResume = async () => {
     setResuming(true)
     try {
@@ -200,6 +270,40 @@ export default function WorkflowRunPage() {
       setResuming(false)
     }
   }
+
+  const manualPause = async () => {
+    setPausePending(true)
+    try {
+      await pauseRun(runId)
+      toast.success('Pause requested. Current agent will finish before pausing.')
+      setRun(await getRun(runId))
+    } catch {
+      toast.error('Pause request failed')
+    } finally {
+      setPausePending(false)
+    }
+  }
+
+  const manualStop = async () => {
+    setStopPending(true)
+    try {
+      await stopRun(runId)
+      toast.success(run?.status === 'paused' ? 'Workflow stopped' : 'Stop requested. Current agent will finish before stopping.')
+      setRun(await getRun(runId))
+    } catch {
+      toast.error('Stop request failed')
+    } finally {
+      setStopPending(false)
+    }
+  }
+
+  const control = run?.control || {}
+  const canPause = run && ['running', 'resuming'].includes(run.status) && !control.pause_requested && !control.stop_requested
+  const canStop = run && ['running', 'resuming', 'paused'].includes(run.status) && !control.stop_requested
+  const canResume = run && ['paused', 'failed', 'stopped'].includes(run.status)
+  const resumeLabel = run?.status === 'stopped' ? 'Start' : 'Resume'
+  const timing = run?.timing || {}
+  const activeEstimate = timing.agent_estimates?.find((item) => item.step_number === run?.current_step)
 
   return (
     <div data-testid="run-page" className="flex h-full bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
@@ -215,9 +319,19 @@ export default function WorkflowRunPage() {
           <div className="flex items-center gap-2 flex-wrap">
             {streaming && <span data-testid="sse-indicator" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-widest bg-accent/10 border border-accent/30 text-accent"><Radio size={10} className="animate-pulse" /> live</span>}
             {run && <StatusBadge status={run.status} />}
-            {run && ['paused', 'failed', 'resuming'].includes(run.status) && (
+            {canPause && (
+              <button onClick={manualPause} disabled={pausePending} className="px-3 py-1.5 rounded-md border border-line bg-panel/80 text-sm hover:border-warn/40 inline-flex items-center gap-1.5 disabled:opacity-50">
+                <PauseCircle size={13} /> {pausePending ? 'Requesting pause...' : 'Pause'}
+              </button>
+            )}
+            {canStop && (
+              <button onClick={manualStop} disabled={stopPending} className="px-3 py-1.5 rounded-md border border-bad/30 bg-bad/10 text-bad text-sm hover:opacity-90 inline-flex items-center gap-1.5 disabled:opacity-50">
+                <Square size={13} /> {stopPending ? 'Stopping...' : 'Stop'}
+              </button>
+            )}
+            {canResume && (
               <button onClick={manualResume} disabled={resuming} className="px-3 py-1.5 rounded-md border border-line bg-panel/80 text-sm hover:border-accent/40 inline-flex items-center gap-1.5 disabled:opacity-50">
-                <RefreshCcw size={13} /> {resuming ? 'Resuming...' : 'Resume'}
+                <RefreshCcw size={13} /> {resuming ? `${resumeLabel === 'Start' ? 'Starting' : 'Resuming'}...` : resumeLabel}
               </button>
             )}
             {report && (
@@ -231,6 +345,17 @@ export default function WorkflowRunPage() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="px-6 py-3 border-b border-line/70 bg-panel/35 flex items-center gap-3 flex-wrap text-xs text-muted">
+          <span>Elapsed: <span className="text-ink font-medium">{formatDuration(timing.elapsed_ms)}</span></span>
+          <span>Estimated total: <span className="text-ink font-medium">{formatDuration(timing.estimated_total_ms)}</span></span>
+          <span>Remaining: <span className="text-ink font-medium">{formatDuration(timing.estimated_remaining_ms)}</span></span>
+          {activeEstimate && (
+            <span>Current agent ETA: <span className="text-ink font-medium">{formatDuration(activeEstimate.avg_latency_ms)}</span></span>
+          )}
+          {control.pause_requested && <span className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-warn">pause queued</span>}
+          {control.stop_requested && <span className="rounded-full border border-bad/30 bg-bad/10 px-2 py-0.5 text-bad">stop queued</span>}
         </div>
 
         {run?.status === 'paused' && (
@@ -254,25 +379,46 @@ export default function WorkflowRunPage() {
       </div>
 
       <aside className="w-[380px] shrink-0 border-l border-line bg-panel/55 backdrop-blur flex flex-col">
+        <div className="px-4 py-3 border-b border-line">
+          <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Execution estimates</div>
+          <div className="space-y-2">
+            {(timing.agent_estimates || []).map((item) => (
+              <div key={item.step_number} className={`rounded-lg border px-3 py-2 ${item.step_number === run?.current_step ? 'border-accent/35 bg-accent/10' : 'border-line bg-elev/30'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-medium truncate">{item.agent_name}</div>
+                  <div className="text-[10px] font-mono text-muted">avg {formatDuration(item.avg_latency_ms)}</div>
+                </div>
+                <div className="text-[10px] font-mono text-muted mt-1">
+                  {item.actual_latency_ms != null ? `actual ${formatDuration(item.actual_latency_ms)}` : `${item.samples} historical sample${item.samples === 1 ? '' : 's'}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="px-4 py-3 border-b border-line flex items-center gap-2">
           <MessageSquare size={14} className="text-accent" />
           <div className="text-sm font-display font-semibold">A2A Message Log</div>
           <span className="text-[10px] font-mono text-muted ml-auto">{(run?.a2a_messages || []).length}</span>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div ref={a2aScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2">
           {(run?.a2a_messages || []).length === 0 && <div className="text-center text-muted text-sm py-10">No messages yet.</div>}
           {(run?.a2a_messages || []).map((message) => (
             <button
               key={message.message_id}
               type="button"
               onClick={() => setExpandedMessageId((prev) => (prev === message.message_id ? '' : message.message_id))}
-              className="w-full p-3 rounded-xl border border-line bg-elev/40 text-left hover:border-accent/30 transition"
+              className={`w-full p-3 rounded-xl border text-left transition ${
+                latestA2AMessageId === message.message_id
+                  ? 'border-accent/35 bg-accent/10'
+                  : 'border-line bg-elev/40 hover:border-accent/30'
+              }`}
             >
               <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wide mb-1.5">
                 <span className="text-accent truncate">{message.from_agent}</span>
                 <span className="text-muted">to</span>
                 <span className="text-accent2 truncate">{message.to_agent}</span>
                 <span className="ml-auto text-muted">{message.message_type}</span>
+                {latestA2AMessageId === message.message_id && <span className="text-accent animate-pulse">live</span>}
                 {expandedMessageId === message.message_id ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
               </div>
               <pre className={`text-[11px] font-mono text-muted whitespace-pre-wrap break-all ${expandedMessageId === message.message_id ? '' : 'line-clamp-4'}`}>{JSON.stringify(message.payload, null, 2)}</pre>

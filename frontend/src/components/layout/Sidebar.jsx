@@ -40,7 +40,7 @@ export default function Sidebar() {
           </div>
           {!collapsed && (
             <div className="leading-tight">
-              <div className="font-display font-semibold text-base tracking-tight">AIger&apos;s Universe</div>
+              <div className="font-display font-semibold text-base tracking-tight">Aigers Universe</div>
               <div className="text-[10px] text-muted uppercase tracking-[0.18em] mt-0.5">{user?.role === 'admin' ? 'Admin Workspace' : 'User Workspace'}</div>
             </div>
           )}

@@ -43,6 +43,19 @@ DEFAULT_INPUT_BINDINGS = {
 }
 
 
+def _utcnow_iso() -> str:
+    return datetime.datetime.utcnow().isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 async def _hydrate_workflow_inputs(input_data: dict) -> dict:
     workflow_inputs = dict((input_data or {}).get("workflow_inputs") or {})
     upload_ids = workflow_inputs.get("upload_document_ids") or []
@@ -81,6 +94,47 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
         }
 
     return {**(input_data or {}), "workflow_inputs": workflow_inputs}
+
+
+async def _read_run_control(run_id: str) -> dict:
+    db = get_db()
+    run = await db.workflow_runs.find_one(
+        {"run_id": run_id},
+        {"_id": 0, "status": 1, "control": 1, "current_step": 1, "completed_at": 1, "hitl_id": 1},
+    )
+    return run or {}
+
+
+async def _apply_requested_control(run_id: str, next_step: int) -> str | None:
+    db = get_db()
+    run = await _read_run_control(run_id)
+    control = run.get("control") or {}
+    if control.get("stop_requested"):
+        await db.workflow_runs.update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "status": "stopped",
+                    "current_step": next_step,
+                    "completed_at": _utcnow_iso(),
+                    "updated_at": _utcnow_iso(),
+                }
+            },
+        )
+        return "stopped"
+    if control.get("pause_requested"):
+        await db.workflow_runs.update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "status": "paused",
+                    "current_step": next_step,
+                    "updated_at": _utcnow_iso(),
+                }
+            },
+        )
+        return "paused"
+    return None
 
 
 def _compose_agent_input(state: WorkflowState, agent_config: dict) -> dict:
@@ -138,21 +192,33 @@ async def _wait_for_hitl_resume(hitl_id: str, run_id: str) -> dict:
     db = get_db()
     event = resume_signals.get_or_create_event(hitl_id)
     timeout = settings.HITL_TIMEOUT_SECONDS
+    started = datetime.datetime.utcnow()
 
-    try:
-        await asyncio.wait_for(event.wait(), timeout=timeout)
-        result = resume_signals.get_result(hitl_id) or {}
-        resume_signals.clear(hitl_id)
-        return result
-    except asyncio.TimeoutError:
-        record = await db.hitl_records.find_one({"hitl_id": hitl_id}, {"_id": 0})
-        if record and record.get("status") in ("approved", "rejected"):
-            return {
-                "decision": "approve" if record["status"] == "approved" else "reject",
-                "note": record.get("human_note", ""),
-            }
-        logger.warning("hitl.wait.timeout", hitl_id=hitl_id, run_id=run_id)
-        return {"decision": "reject", "note": f"HITL timeout after {timeout}s"}
+    while True:
+        if event.is_set():
+            result = resume_signals.get_result(hitl_id) or {}
+            resume_signals.clear(hitl_id)
+            return result
+
+        run = await _read_run_control(run_id)
+        control = run.get("control") or {}
+        if control.get("stop_requested") or run.get("status") == "stopped":
+            return {"decision": "stop", "note": "Workflow stopped by user"}
+        if run.get("status") == "failed":
+            return {"decision": "reject", "note": run.get("failure_reason") or "Workflow failed while paused"}
+
+        elapsed = (datetime.datetime.utcnow() - started).total_seconds()
+        if elapsed >= timeout:
+            record = await db.hitl_records.find_one({"hitl_id": hitl_id}, {"_id": 0})
+            if record and record.get("status") in ("approved", "rejected"):
+                return {
+                    "decision": "approve" if record["status"] == "approved" else "reject",
+                    "note": record.get("human_note", ""),
+                }
+            logger.warning("hitl.wait.timeout", hitl_id=hitl_id, run_id=run_id)
+            return {"decision": "reject", "note": f"HITL timeout after {timeout}s"}
+
+        await asyncio.sleep(1)
 
 
 async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
@@ -161,7 +227,7 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
     agent_config = agents[step_idx]
     agent_name = agent_config["name"]
     db = get_db()
-    now = datetime.datetime.utcnow().isoformat()
+    now = _utcnow_iso()
 
     await db.workflow_runs.update_one(
         {"run_id": run_id},
@@ -207,7 +273,7 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
         "tokens_used": result.get("tokens_used", 0),
         "latency_ms": result.get("latency_ms", 0.0),
         "tools_called": result.get("tools_called", []),
-        "completed_at": datetime.datetime.utcnow().isoformat(),
+        "completed_at": _utcnow_iso(),
         "error": result.get("error"),
     }
 
@@ -219,7 +285,7 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
                 "$set": {
                     "status": "failed",
                     "failure_reason": result.get("error") or "Agent failure",
-                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                    "updated_at": _utcnow_iso(),
                 },
             },
         )
@@ -249,21 +315,27 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
         if hitl_id:
             logger.info("workflow.paused.awaiting_hitl", run_id=run_id, hitl_id=hitl_id)
             decision = await _wait_for_hitl_resume(hitl_id, run_id)
+            if decision.get("decision") == "stop":
+                await db.workflow_runs.update_one(
+                    {"run_id": run_id},
+                    {"$set": {"status": "stopped", "failure_reason": None, "hitl_id": None, "completed_at": _utcnow_iso(), "updated_at": _utcnow_iso()}},
+                )
+                return {"outputs": outputs, "status": "stopped"}
             if decision.get("decision") == "reject":
                 await db.workflow_runs.update_one(
                     {"run_id": run_id},
-                    {"$set": {"status": "failed", "failure_reason": f"HITL rejected: {decision.get('note', '')}"}},
+                    {"$set": {"status": "failed", "failure_reason": f"HITL rejected: {decision.get('note', '')}", "updated_at": _utcnow_iso()}},
                 )
                 return {"outputs": outputs, "status": "failed", "failure_reason": f"HITL rejected: {decision.get('note', '')}"}
 
             await db.workflow_runs.update_one(
                 {"run_id": run_id},
-                {"$set": {"status": "running", "hitl_id": None, "updated_at": datetime.datetime.utcnow().isoformat()}},
+                {"$set": {"status": "running", "hitl_id": None, "updated_at": _utcnow_iso()}},
             )
             outputs[f"{agent_name}_hitl"] = {"approved": True, "note": decision.get("note", "")}
             await db.workflow_runs.update_one(
                 {"run_id": run_id},
-                {"$set": {"outputs_by_agent": outputs, "updated_at": datetime.datetime.utcnow().isoformat()}},
+                {"$set": {"outputs_by_agent": outputs, "updated_at": _utcnow_iso()}},
             )
 
     return {"outputs": outputs, "current_step": step_idx + 1}
@@ -281,8 +353,8 @@ async def _finalize_run(run_id: str, state: WorkflowState) -> None:
                 "status": "completed",
                 "final_output": final_output,
                 "outputs_by_agent": outputs,
-                "completed_at": datetime.datetime.utcnow().isoformat(),
-                "updated_at": datetime.datetime.utcnow().isoformat(),
+                "completed_at": _utcnow_iso(),
+                "updated_at": _utcnow_iso(),
             }
         },
     )
@@ -297,7 +369,7 @@ async def _finalize_run(run_id: str, state: WorkflowState) -> None:
                     "report_structured": report["structured"],
                     "pii_findings": report["pii_findings"],
                     "citations": report["citations"],
-                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                    "updated_at": _utcnow_iso(),
                 }
             },
         )
@@ -308,6 +380,14 @@ async def _run_workflow_steps(state: WorkflowState, start_step: int = 0) -> None
     db = get_db()
     try:
         for step_idx in range(start_step, len(state["agents"])):
+            control_status = await _apply_requested_control(run_id, step_idx)
+            if control_status == "paused":
+                logger.info("workflow.run.paused_by_user", run_id=run_id, step=step_idx)
+                return
+            if control_status == "stopped":
+                logger.info("workflow.run.stopped_by_user", run_id=run_id, step=step_idx)
+                return
+
             result = await _execute_agent_step(state, step_idx)
             state["outputs"] = result.get("outputs", state.get("outputs", {}))
             state["current_step"] = result.get("current_step", step_idx)
@@ -318,11 +398,24 @@ async def _run_workflow_steps(state: WorkflowState, start_step: int = 0) -> None
                         "$set": {
                             "status": "failed",
                             "failure_reason": result.get("failure_reason") or "Workflow failed",
-                            "completed_at": datetime.datetime.utcnow().isoformat(),
-                            "updated_at": datetime.datetime.utcnow().isoformat(),
+                            "completed_at": _utcnow_iso(),
+                            "updated_at": _utcnow_iso(),
                         }
                     },
                 )
+                return
+            if result.get("status") == "stopped":
+                await db.workflow_runs.update_one(
+                    {"run_id": run_id},
+                    {"$set": {"status": "stopped", "completed_at": _utcnow_iso(), "updated_at": _utcnow_iso()}},
+                )
+                return
+            control_status = await _apply_requested_control(run_id, step_idx + 1)
+            if control_status == "paused":
+                logger.info("workflow.run.paused_by_user", run_id=run_id, step=step_idx + 1)
+                return
+            if control_status == "stopped":
+                logger.info("workflow.run.stopped_by_user", run_id=run_id, step=step_idx + 1)
                 return
         await _finalize_run(run_id, state)
         logger.info("workflow.run.complete", run_id=run_id)
@@ -334,8 +427,8 @@ async def _run_workflow_steps(state: WorkflowState, start_step: int = 0) -> None
                 "$set": {
                     "status": "failed",
                     "failure_reason": str(exc),
-                    "completed_at": datetime.datetime.utcnow().isoformat(),
-                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                    "completed_at": _utcnow_iso(),
+                    "updated_at": _utcnow_iso(),
                 }
             },
         )
@@ -429,6 +522,7 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
             "updated_at": started_at,
             "completed_at": None,
             "failure_reason": None,
+            "control": {"pause_requested": False, "stop_requested": False, "requested_at": None},
         }
     )
 
@@ -480,7 +574,15 @@ async def resume_workflow_run(run_id: str) -> dict:
 
     await db.workflow_runs.update_one(
         {"run_id": run_id},
-        {"$set": {"status": "running", "current_step": start_step, "updated_at": datetime.datetime.utcnow().isoformat()}},
+        {
+            "$set": {
+                "status": "running",
+                "current_step": start_step,
+                "completed_at": None,
+                "updated_at": _utcnow_iso(),
+                "control": {"pause_requested": False, "stop_requested": False, "requested_at": None},
+            }
+        },
     )
     resume_state: WorkflowState = {
         "workflow_run_id": run_id,
@@ -494,3 +596,38 @@ async def resume_workflow_run(run_id: str) -> dict:
     }
     asyncio.create_task(_run_workflow_steps(resume_state, start_step=start_step))
     return {"run_id": run_id, "status": "running", "resumed_from_step": start_step}
+
+
+async def request_workflow_pause(run_id: str) -> dict:
+    db = get_db()
+    run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0, "status": 1, "current_step": 1})
+    if not run:
+        raise ValueError(f"Run '{run_id}' not found")
+    if run.get("status") in ("completed", "failed", "stopped"):
+        return {"run_id": run_id, "status": run.get("status"), "message": "Run is already terminal"}
+    await db.workflow_runs.update_one(
+        {"run_id": run_id},
+        {"$set": {"control.pause_requested": True, "control.requested_at": _utcnow_iso(), "updated_at": _utcnow_iso()}},
+    )
+    return {"run_id": run_id, "status": run.get("status"), "requested": "pause", "current_step": run.get("current_step", 0)}
+
+
+async def request_workflow_stop(run_id: str) -> dict:
+    db = get_db()
+    run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0, "status": 1, "current_step": 1, "hitl_id": 1})
+    if not run:
+        raise ValueError(f"Run '{run_id}' not found")
+    if run.get("status") in ("completed", "failed", "stopped"):
+        return {"run_id": run_id, "status": run.get("status"), "message": "Run is already terminal"}
+
+    update = {
+        "$set": {
+            "control.stop_requested": True,
+            "control.requested_at": _utcnow_iso(),
+            "updated_at": _utcnow_iso(),
+        }
+    }
+    if run.get("status") == "paused":
+        update["$set"].update({"status": "stopped", "hitl_id": None, "completed_at": _utcnow_iso()})
+    await db.workflow_runs.update_one({"run_id": run_id}, update)
+    return {"run_id": run_id, "status": "stopped" if run.get("status") == "paused" else run.get("status"), "requested": "stop", "current_step": run.get("current_step", 0)}

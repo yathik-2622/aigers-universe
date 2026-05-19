@@ -2,11 +2,11 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
-  Bot,
   BrainCircuit,
   CheckCircle2,
   FileStack,
   Globe,
+  Hexagon,
   Layers3,
   Network,
   Radar,
@@ -93,13 +93,14 @@ export default function LandingPage() {
         <nav className="sticky top-0 z-40 border-b border-white/6 bg-[#05070f]/78 backdrop-blur-2xl">
           <div className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-3 sm:flex-nowrap sm:py-0">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-accent/25 bg-accent/10 shadow-[0_0_42px_rgba(0,213,255,0.12)]">
-                <Bot size={16} className="text-accent" />
-              </div>
-              <div>
-                <div className="font-display text-sm uppercase tracking-[0.14em]">AIger&apos;s Universe</div>
-                <div className="text-[10px] uppercase tracking-[0.24em] text-muted">Agent orchestration control plane</div>
-              </div>
+                <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-accent/25 bg-accent/10 shadow-[0_0_42px_rgba(0,213,255,0.12)]">
+                  <Hexagon size={24} strokeWidth={1.5} className="text-accent absolute" />
+                  <Hexagon size={15} strokeWidth={1.5} className="text-amber-300 rotate-90 absolute" />
+                </div>
+                <div>
+                  <div className="font-display text-sm uppercase tracking-[0.14em]">Aigers Universe</div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-muted">Enterprise AI platform</div>
+                </div>
             </div>
             <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
               <Link to="/login" className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm transition hover:border-accent/35 sm:px-5">

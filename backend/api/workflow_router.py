@@ -15,7 +15,7 @@ from core.llm_router import chat_completion
 from core.report_builder import build_run_report
 from db.mongo_client import get_db
 from core.request_context import get_optional_role, get_optional_user_id
-from core.workflow_engine import build_and_run_workflow, resume_workflow_run
+from core.workflow_engine import build_and_run_workflow, request_workflow_pause, request_workflow_stop, resume_workflow_run
 from a2a.agent_communication import get_a2a_messages
 from db.repositories.agent_repo import AgentRepository
 
@@ -30,6 +30,112 @@ DEFAULT_INPUT_BINDINGS = {
     "include_upstream_outputs": True,
 }
 FRAMEWORK_TAGS = {"langgraph", "langchain", "crewai", "agno"}
+
+
+def _parse_iso(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _duration_ms(start_value: str | None, end_value: str | None = None) -> int | None:
+    start_dt = _parse_iso(start_value)
+    end_dt = _parse_iso(end_value) if end_value else datetime.datetime.utcnow()
+    if not start_dt or not end_dt:
+        return None
+    return max(0, int((end_dt - start_dt).total_seconds() * 1000))
+
+
+async def _attach_run_timing(db, run: dict) -> dict:
+    if not run:
+        return run
+
+    agent_names = [agent.get("agent_name") for agent in run.get("agents", []) if agent.get("agent_name")]
+    if agent_names:
+        per_agent_cursor = db.agent_traces.aggregate(
+            [
+                {"$match": {"agent_name": {"$in": agent_names}, "status": "success"}},
+                {"$group": {"_id": "$agent_name", "avg_latency_ms": {"$avg": "$latency_ms"}, "count": {"$sum": 1}}},
+            ]
+        )
+        latency_by_agent = {
+            item["_id"]: {"avg_latency_ms": round(item.get("avg_latency_ms") or 0.0, 2), "samples": int(item.get("count") or 0)}
+            for item in await per_agent_cursor.to_list(200)
+            if item.get("_id")
+        }
+    else:
+        latency_by_agent = {}
+
+    workflow_avg_total_ms = None
+    if run.get("workflow_id"):
+        workflow_run_cursor = db.workflow_runs.aggregate(
+            [
+                {"$match": {"workflow_id": run["workflow_id"], "status": "completed", "started_at": {"$ne": None}, "completed_at": {"$ne": None}}},
+                {
+                    "$project": {
+                        "duration_ms": {
+                            "$dateDiff": {
+                                "startDate": {"$dateFromString": {"dateString": "$started_at"}},
+                                "endDate": {"$dateFromString": {"dateString": "$completed_at"}},
+                                "unit": "millisecond",
+                            }
+                        }
+                    }
+                },
+                {"$group": {"_id": None, "avg_duration_ms": {"$avg": "$duration_ms"}}},
+            ]
+        )
+        workflow_stats = await workflow_run_cursor.to_list(1)
+        if workflow_stats:
+            workflow_avg_total_ms = int(workflow_stats[0].get("avg_duration_ms") or 0)
+
+    current_step = int(run.get("current_step") or 0)
+    result_by_step = {
+        item.get("step_number"): item
+        for item in (run.get("agent_results") or [])
+        if isinstance(item.get("step_number"), int)
+    }
+    agent_estimates = []
+    total_agent_estimate_ms = 0
+    remaining_ms = 0
+    active_statuses = {"running", "resuming", "paused"}
+    for idx, agent in enumerate(run.get("agents", []) or []):
+        name = agent.get("agent_name", "")
+        estimate = latency_by_agent.get(name, {})
+        avg_latency_ms = int(estimate.get("avg_latency_ms") or 0)
+        total_agent_estimate_ms += avg_latency_ms
+        result = result_by_step.get(idx)
+        if run.get("status") in active_statuses and result is None and idx >= current_step:
+            remaining_ms += avg_latency_ms
+        agent_estimates.append(
+            {
+                "agent_id": agent.get("agent_id"),
+                "agent_name": name,
+                "step_number": idx,
+                "avg_latency_ms": avg_latency_ms,
+                "samples": int(estimate.get("samples") or 0),
+                "actual_latency_ms": int(result.get("latency_ms") or 0) if result else None,
+            }
+        )
+
+    elapsed_ms = _duration_ms(run.get("started_at"), run.get("completed_at"))
+    total_estimate_ms = workflow_avg_total_ms or total_agent_estimate_ms or None
+    if run.get("status") == "completed":
+        remaining_ms = 0
+    elif elapsed_ms is not None and total_estimate_ms and total_estimate_ms > elapsed_ms:
+        remaining_ms = max(remaining_ms, total_estimate_ms - elapsed_ms)
+
+    run["timing"] = {
+        "elapsed_ms": elapsed_ms,
+        "estimated_total_ms": total_estimate_ms,
+        "estimated_remaining_ms": remaining_ms,
+        "workflow_average_total_ms": workflow_avg_total_ms,
+        "agent_estimates": agent_estimates,
+    }
+    return run
 
 
 async def _accessible_project_ids(db, user_id: str | None, role: str | None) -> list[str]:
@@ -513,6 +619,7 @@ async def get_run_status(run_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     # Attach A2A messages live
     run["a2a_messages"] = await get_a2a_messages(workflow_run_id=run_id)
+    run = await _attach_run_timing(db, run)
     return run
 
 
@@ -590,6 +697,34 @@ async def resume_run(run_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to resume workflow: {exc}")
 
 
+@router.post("/runs/{run_id}/pause")
+async def pause_run(run_id: str, request: Request):
+    db = get_db()
+    query = await _run_query(db, request, {"run_id": run_id})
+    run = await db.workflow_runs.find_one(query, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    try:
+        return await request_workflow_pause(run_id)
+    except Exception as exc:
+        logger.error("api.workflow.pause_failed", run_id=run_id, error=str(exc), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to request workflow pause: {exc}")
+
+
+@router.post("/runs/{run_id}/stop")
+async def stop_run(run_id: str, request: Request):
+    db = get_db()
+    query = await _run_query(db, request, {"run_id": run_id})
+    run = await db.workflow_runs.find_one(query, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    try:
+        return await request_workflow_stop(run_id)
+    except Exception as exc:
+        logger.error("api.workflow.stop_failed", run_id=run_id, error=str(exc), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to request workflow stop: {exc}")
+
+
 
 @router.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str, request: Request):
@@ -604,7 +739,9 @@ async def stream_run(run_id: str, request: Request):
     db = get_db()
 
     async def event_generator():
-        last_payload: str | None = None
+        last_run_payload: str | None = None
+        last_a2a_ids: list[str] = []
+        sent_snapshot = False
         idle_loops = 0
         max_idle_loops = 600  # ~5 min @ 500ms — guards against orphaned streams
 
@@ -615,18 +752,45 @@ async def stream_run(run_id: str, request: Request):
                 yield f"event: error\ndata: {json.dumps({'error': 'run not found'})}\n\n"
                 return
 
-            run["a2a_messages"] = await get_a2a_messages(workflow_run_id=run_id)
-            payload = json.dumps(run, default=str)
+            a2a_messages = await get_a2a_messages(workflow_run_id=run_id)
+            run_payload = json.dumps(run, default=str)
+            current_a2a_ids = [msg.get("message_id", "") for msg in a2a_messages]
+            emitted = False
 
-            if payload != last_payload:
-                yield f"data: {payload}\n\n"
-                last_payload = payload
+            if not sent_snapshot:
+                snapshot = await _attach_run_timing(db, {**run, "a2a_messages": a2a_messages})
+                yield f"event: run_snapshot\ndata: {json.dumps(snapshot, default=str)}\n\n"
+                last_run_payload = run_payload
+                last_a2a_ids = current_a2a_ids
+                sent_snapshot = True
                 idle_loops = 0
+                emitted = True
             else:
-                idle_loops += 1
+                if run_payload != last_run_payload:
+                    payload = await _attach_run_timing(db, dict(run))
+                    yield f"event: run_update\ndata: {json.dumps(payload, default=str)}\n\n"
+                    last_run_payload = run_payload
+                    emitted = True
+
+                if len(current_a2a_ids) < len(last_a2a_ids):
+                    yield f"event: a2a_reset\ndata: {json.dumps(a2a_messages, default=str)}\n\n"
+                    last_a2a_ids = current_a2a_ids
+                    emitted = True
+                elif len(current_a2a_ids) > len(last_a2a_ids):
+                    known = set(last_a2a_ids)
+                    new_messages = [msg for msg in a2a_messages if msg.get("message_id", "") not in known]
+                    for message in new_messages:
+                        yield f"event: a2a_message\ndata: {json.dumps(message, default=str)}\n\n"
+                    last_a2a_ids = current_a2a_ids
+                    emitted = emitted or bool(new_messages)
+
+                if emitted:
+                    idle_loops = 0
+                else:
+                    idle_loops += 1
 
             # Close stream when terminal
-            if run.get("status") in ("completed", "failed"):
+            if run.get("status") in ("completed", "failed", "stopped"):
                 yield f"event: end\ndata: {json.dumps({'status': run['status']})}\n\n"
                 return
 

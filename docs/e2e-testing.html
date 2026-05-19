@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aigers Universe E2E Testing Guide</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: rgba(255, 252, 247, 0.92);
+      --text: #1d1a17;
+      --muted: #675d52;
+      --accent: #0f766e;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+      --border: rgba(61, 52, 44, 0.12);
+      --shadow: 0 20px 60px rgba(66, 51, 35, 0.08);
+      --code: #f1e7d8;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Inter", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255, 214, 153, 0.35), transparent 28%),
+        radial-gradient(circle at top right, rgba(125, 211, 252, 0.18), transparent 22%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+      line-height: 1.6;
+    }
+
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+
+    .hero, .section, .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 32px;
+      margin-bottom: 28px;
+      background: linear-gradient(145deg, rgba(255, 250, 242, 0.95), rgba(255, 246, 232, 0.85));
+    }
+
+    .section {
+      padding: 28px;
+      margin-bottom: 22px;
+    }
+
+    .card {
+      padding: 22px;
+    }
+
+    .grid, .two-col {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: 28px; }
+    .two-col { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+
+    h1 { font-size: clamp(2rem, 5vw, 3.2rem); margin-top: 16px; }
+    h2 { font-size: 1.45rem; }
+    h3 { font-size: 1.05rem; color: var(--accent); }
+
+    p { margin: 0 0 12px; color: var(--muted); }
+    ol, ul { margin: 10px 0 0 22px; padding: 0; }
+    li { margin: 6px 0; }
+
+    code {
+      background: var(--code);
+      border-radius: 8px;
+      padding: 2px 7px;
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 0.95em;
+      color: #5f2500;
+    }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 16px;
+      border-radius: 16px;
+      background: #1f1a17;
+      color: #fdf8ef;
+      overflow-x: auto;
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 14px;
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(29, 26, 23, 0.06);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .checklist li { list-style: square; }
+    a { color: var(--accent); }
+
+    @media (max-width: 640px) {
+      .page { padding: 20px 14px 44px; }
+      .hero, .section, .card { padding: 20px; border-radius: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <span class="eyebrow">Aigers Universe • UI-first QA</span>
+      <h1>End-to-End Testing Guide</h1>
+      <p>This guide covers the full Aigers Universe platform from login through projects, team members, workflow building, workflow execution controls, HITL, reporting, and AIger Copilot.</p>
+      <div class="pill-list">
+        <span class="pill">Landing and login</span>
+        <span class="pill">Projects and team members</span>
+        <span class="pill">Marketplace and agents</span>
+        <span class="pill">Workflow Builder and run page</span>
+        <span class="pill">Pause, resume, stop, and start</span>
+        <span class="pill">Copilot grounding and trace</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Before You Start</h2>
+        <p>Confirm backend and frontend are running and required environment values are configured.</p>
+        <pre>cd backend
+uvicorn server:app --reload --host 0.0.0.0 --port 8001
+
+cd frontend
+yarn start</pre>
+      </article>
+      <article class="card">
+        <h2>Primary Demo Repos</h2>
+        <ul>
+          <li><code>https://github.com/mybatis/jpetstore-6</code></li>
+          <li><code>https://github.com/spring-projects/spring-petclinic</code></li>
+          <li><code>https://github.com/streamlit/streamlit-example</code></li>
+          <li><code>https://github.com/gothinkster/react-redux-realworld-example-app</code></li>
+          <li><code>https://github.com/dotnet-architecture/eShopOnWeb</code></li>
+          <li><code>https://github.com/fastapi/full-stack-fastapi-template</code></li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="section">
+      <h2>1. Entry and Sign-in</h2>
+      <ol>
+        <li>Open the landing page at <code>http://localhost:3000</code>.</li>
+        <li>Verify the updated app branding shows <code>Aigers Universe</code> and the hexagon icon.</li>
+        <li>Click <code>Enter workspace</code> or <code>Log in</code>.</li>
+        <li>Sign in using a valid user flow.</li>
+        <li>Confirm you land on the dashboard.</li>
+      </ol>
+      <p><strong>Expected:</strong> no layout overlap, correct branding, and successful authentication.</p>
+    </section>
+
+    <section class="section">
+      <h2>2. Smoke Check Core Pages</h2>
+      <ol>
+        <li>Open <code>Dashboard</code>.</li>
+        <li>Open <code>Projects</code>.</li>
+        <li>Open <code>Marketplace</code>.</li>
+        <li>Open <code>Agents</code>.</li>
+        <li>Open <code>Workflow Builder</code>.</li>
+        <li>Open <code>AIger Copilot</code>.</li>
+        <li>Open <code>HITL</code>.</li>
+        <li>Open <code>Observability</code>.</li>
+      </ol>
+      <p><strong>Expected:</strong> each page loads without crash or blank-state blocker.</p>
+    </section>
+
+    <section class="section">
+      <h2>3. Projects and Team Members</h2>
+      <ol>
+        <li>Open <code>Projects</code>.</li>
+        <li>Create a project named <code>Wave 1</code>.</li>
+        <li>Add at least two team member email addresses.</li>
+        <li>Save the project.</li>
+        <li>Reopen the same project.</li>
+        <li>Confirm team members, owner, and project metadata persist.</li>
+      </ol>
+      <p><strong>Expected:</strong> project creation and member assignment persist correctly and remain editable.</p>
+    </section>
+
+    <section class="section">
+      <h2>4. Marketplace and Agents</h2>
+      <div class="two-col">
+        <div>
+          <h3>Install these agents</h3>
+          <ul>
+            <li><code>Java to Spring Boot Architect</code></li>
+            <li><code>Java to Python Service Translator</code></li>
+            <li><code>Risk Analyzer</code></li>
+            <li><code>Compliance Checker</code></li>
+            <li><code>Recommendation Advisor</code></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Verify on Agents page</h3>
+          <ul>
+            <li>framework badge</li>
+            <li>model badge</li>
+            <li>tag rendering</li>
+            <li>remote A2A state when enabled</li>
+            <li>delete and export actions</li>
+          </ul>
+        </div>
+      </div>
+      <p><strong>Expected:</strong> install works, cards render correctly, and no broken duplicate state appears.</p>
+    </section>
+
+    <section class="section">
+      <h2>5. Remote A2A Validation</h2>
+      <ol>
+        <li>Open <code>Agents</code> and find <code>Local agent cards</code>.</li>
+        <li>Copy one local card URL.</li>
+        <li>Create a new agent with <code>A2A enabled = true</code> and <code>A2A mode = Remote</code>.</li>
+        <li>Paste the copied URL.</li>
+        <li>Click <code>Test remote card</code>.</li>
+        <li>Save the agent.</li>
+      </ol>
+      <p><strong>Expected:</strong> validation succeeds before save and the resulting agent shows remote A2A state.</p>
+    </section>
+
+    <section class="section">
+      <h2>6. Workflow Builder Setup</h2>
+      <ol>
+        <li>Open <code>Workflow Builder</code>.</li>
+        <li>Select project <code>Wave 1</code>.</li>
+        <li>Verify the reduced header height looks compact and stable.</li>
+        <li>Name the workflow <code>Wave 1 Modernization</code>.</li>
+      </ol>
+      <p><strong>Expected:</strong> project scope persists and the builder header remains compact without layout regression.</p>
+    </section>
+
+    <section class="section">
+      <h2>7. Orchestrator Plan Test</h2>
+      <p>Use this prompt:</p>
+      <pre>Modernize this Java monolith into Spring Boot services, assess migration risk, and produce a phased remediation backlog.</pre>
+      <ol>
+        <li>Click <code>Auto-build workflow</code>.</li>
+        <li>In the planner modal test <code>Edit</code>, <code>Replan</code>, and <code>Reject</code>.</li>
+        <li>Generate the plan again.</li>
+        <li>Click <code>Accept</code>.</li>
+      </ol>
+      <p><strong>Expected:</strong> the planner behaves correctly, closes on accept, and nodes animate onto the canvas in order.</p>
+    </section>
+
+    <section class="section">
+      <h2>8. Workflow Inputs and Knowledge Base</h2>
+      <div class="two-col">
+        <div>
+          <h3>Run-scoped workflow inputs</h3>
+          <ol>
+            <li>Add a text goal.</li>
+            <li>Upload one local file.</li>
+            <li>Import repo <code>https://github.com/mybatis/jpetstore-6</code>.</li>
+          </ol>
+        </div>
+        <div>
+          <h3>Reusable KB</h3>
+          <ol>
+            <li>Upload one architecture or policy document into KB.</li>
+            <li>Optionally import a different repo into KB.</li>
+          </ol>
+        </div>
+      </div>
+      <p><strong>Expected:</strong> workflow inputs and KB remain separate in UI and in execution behavior.</p>
+    </section>
+
+    <section class="section">
+      <h2>9. Manual Builder Test</h2>
+      <ol>
+        <li>Drag two installed agents onto the canvas.</li>
+        <li>Connect them with an edge.</li>
+        <li>Open node config for each.</li>
+        <li>Change prompt, model, tools, input bindings, and A2A mode.</li>
+        <li>Save the workflow.</li>
+      </ol>
+      <p><strong>Expected:</strong> node edits persist and the workflow saves successfully.</p>
+    </section>
+
+    <section class="section">
+      <h2>10. Run a Modernization Workflow</h2>
+      <ol>
+        <li>Use an accepted orchestrator-built workflow or your manual flow.</li>
+        <li>Add a text goal, one Java file, one repo import, and optionally one KB document.</li>
+        <li>Click <code>Run workflow</code>.</li>
+      </ol>
+      <h3>Check on the run page</h3>
+      <ul>
+        <li>active node focus</li>
+        <li>status progression</li>
+        <li><code>Pause</code> requests pause while the current agent finishes</li>
+        <li><code>Resume</code> becomes available when the run is paused</li>
+        <li><code>Stop</code> works for running and paused states</li>
+        <li><code>Start</code> appears for stopped runs and restarts from the valid next step</li>
+        <li>A2A messages stream live</li>
+        <li>latest A2A entry auto-expands</li>
+        <li>final report opens from the same run page</li>
+      </ul>
+      <p><strong>Expected output:</strong> architecture findings, risk findings, remediation backlog, and readable report content.</p>
+    </section>
+
+    <section class="section">
+      <h2>11. HITL Approval Flow</h2>
+      <p>Use this prompt in an appropriate workflow:</p>
+      <pre>Review this vendor contract for key extraction, operational risk, compliance issues, and a final approval recommendation.</pre>
+      <ol>
+        <li>Upload a contract-like document.</li>
+        <li>Wait for the run to pause.</li>
+        <li>Open <code>HITL</code>.</li>
+        <li>Approve one run and reject another.</li>
+        <li>Use the run-page HITL shortcut as well.</li>
+      </ol>
+      <p><strong>Expected:</strong> approval resumes execution, rejection marks failure, and return-to-run keeps operator context.</p>
+    </section>
+
+    <section class="section">
+      <h2>12. AIger Copilot Test</h2>
+      <p>Start a new chat in <code>AIger Copilot</code> mode and use this prompt:</p>
+      <pre>For a Java modernization use case, which agents should I install, which MCP tools should I enable, and what workflow should I build in this platform?</pre>
+      <ol>
+        <li>Check the left history rail and central chat surface.</li>
+        <li>Verify the composer is compact and smaller than before.</li>
+        <li>Verify the composer shows mode, model, tool, and file controls only.</li>
+        <li>Select <code>Auto tool</code> and then a specific tool and confirm both states are respected.</li>
+        <li>Attach 2 or 3 files and ask a follow-up.</li>
+        <li>Rename one chat from history.</li>
+        <li>Delete one chat from history.</li>
+        <li>Start another chat in <code>General Reasoning</code> mode.</li>
+      </ol>
+      <p><strong>Expected:</strong> session persistence works, grounded responses stay accurate, and workflow execution controls are not shown in chat.</p>
+    </section>
+
+    <section class="section">
+      <h2>13. Copilot Reasoning and Live Trace</h2>
+      <ol>
+        <li>Ask a prompt that likely triggers tools or grounding.</li>
+        <li>While the response is running, confirm there is no extra waiting placeholder text.</li>
+        <li>Open the reasoning section and confirm logs are visible by default.</li>
+        <li>Collapse the reasoning section, then reopen it while the same response is still active.</li>
+        <li>Click <code>Open live trace</code>.</li>
+      </ol>
+      <p><strong>Expected:</strong> reasoning logs update from the real backend stream and the live trace stays in sync.</p>
+    </section>
+
+    <section class="section">
+      <h2>14. Report Validation</h2>
+      <ol>
+        <li>Open the final report immediately after any workflow completes.</li>
+        <li>Check heading styling, code blocks, callouts, and citations.</li>
+        <li>Confirm the report opens even if materialization finished just moments before.</li>
+      </ol>
+      <p><strong>Expected:</strong> no broken report state and no report dead end for the user.</p>
+    </section>
+
+    <section class="section">
+      <h2>15. Shared Project Validation</h2>
+      <ol>
+        <li>Create one workflow under <code>Wave 1</code>.</li>
+        <li>Verify the workflow stays associated with the project.</li>
+        <li>Log in as a second team member or validate through the shared project visibility path.</li>
+        <li>Confirm the member can find the same project and workflow.</li>
+        <li>Run the workflow once more from the shared context.</li>
+      </ol>
+      <p><strong>Expected:</strong> project-scoped workflows and runs remain visible to allowed team members.</p>
+    </section>
+
+    <section class="section">
+      <h2>16. Completion Checklist</h2>
+      <ul class="checklist">
+        <li>Login works</li>
+        <li>Branding shows Aigers Universe and the hexagon icon</li>
+        <li>Project creation works</li>
+        <li>Team member assignment persists</li>
+        <li>Marketplace installs work</li>
+        <li>Agents page renders correctly</li>
+        <li>Remote A2A validation works</li>
+        <li>Project scope persists</li>
+        <li>Builder drag-drop works</li>
+        <li>Orchestrator planning works</li>
+        <li>Workflow inputs and KB stay separate</li>
+        <li>Workflow run page pause, resume, stop, and start controls behave correctly</li>
+        <li>A2A messages stream live in run page</li>
+        <li>HITL pause and resume work</li>
+        <li>Report opens from run page</li>
+        <li>Copilot sessions persist</li>
+        <li>Copilot auto-tool selection and explicit tool selection both work</li>
+        <li>Reasoning logs and live trace work dynamically</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
