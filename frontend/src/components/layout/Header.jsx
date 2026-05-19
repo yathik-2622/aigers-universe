@@ -22,14 +22,14 @@ export default function Header() {
   const { override } = useTitle()
   const base = '/' + (loc.pathname.split('/')[1] || 'dashboard')
   if (HIDDEN_ROUTES.has(base)) return null
-  const compact = base === '/tools-chat'
+  const compact = base === '/tools-chat' || base === '/builder'
   const fallback = TITLES[base] || TITLES['/dashboard']
   const meta = override && (override.title || override.subtitle)
     ? { title: override.title || fallback.title, subtitle: override.subtitle || fallback.subtitle }
     : fallback
 
   return (
-    <header data-testid="app-header" className={`border-b border-line bg-panel/40 backdrop-blur-md flex items-center justify-between relative z-10 ${compact ? 'px-6 py-3' : 'px-8 py-5'}`}>
+    <header data-testid="app-header" className={`border-b border-line bg-panel/40 backdrop-blur-md flex items-center justify-between relative z-10 ${compact ? 'px-6 py-2.5' : 'px-8 py-5'}`}>
       <div className="min-w-0">
         <h1 className={`${compact ? 'text-[18px]' : 'text-[22px]'} font-display font-semibold tracking-tight truncate`} data-testid="header-title">{meta.title}</h1>
         <p className={`${compact ? 'text-[12px]' : 'text-[13px]'} text-muted mt-0.5 truncate`} data-testid="header-subtitle">{meta.subtitle}</p>

@@ -345,7 +345,7 @@ export default function ToolPlaygroundPage() {
           prevMessageCountRef.current = detail.session.messages?.length || 0
           setDraftMode(detail.session.mode || 'platform')
           setDraftModel(detail.session.model_name || modelItems[0] || 'gpt-4o')
-          setDraftTool(detail.session.preferred_tool || '')
+          setDraftTool(detail.session.preferred_tool ?? '')
         }
       })
       .catch(() => {})
@@ -374,7 +374,7 @@ export default function ToolPlaygroundPage() {
 
   const currentMode = session?.mode || draftMode
   const currentModel = session?.model_name || draftModel || models[0] || 'gpt-4o'
-  const currentTool = session?.preferred_tool || draftTool || ''
+  const currentTool = session?.preferred_tool ?? draftTool ?? ''
   const placeholder = MODES[currentMode]?.placeholder || MODES.platform.placeholder
   const starterPrompts = MODES[currentMode]?.starters || MODES.platform.starters
 
@@ -424,6 +424,7 @@ export default function ToolPlaygroundPage() {
       setSession(created.session)
       setActiveSessionId(created.session.session_id)
       setSessions((prev) => [created.session, ...prev.filter((item) => item.session_id !== created.session.session_id)])
+      setDraftTool(created.session.preferred_tool ?? draftTool ?? '')
       return created.session
     } finally {
       setCreating(false)
@@ -445,7 +446,7 @@ export default function ToolPlaygroundPage() {
       setSessions((prev) => [created.session, ...prev.filter((item) => item.session_id !== created.session.session_id)])
       setDraftMode(created.session.mode || modeName)
       setDraftModel(created.session.model_name || currentModel)
-      setDraftTool(created.session.preferred_tool || '')
+      setDraftTool(created.session.preferred_tool ?? '')
       setInput('')
       setRenamingSessionId('')
     } catch (err) {
@@ -464,7 +465,7 @@ export default function ToolPlaygroundPage() {
       prevMessageCountRef.current = detail.session.messages?.length || 0
       setDraftMode(detail.session.mode || 'platform')
       setDraftModel(detail.session.model_name || models[0] || 'gpt-4o')
-      setDraftTool(detail.session.preferred_tool || '')
+      setDraftTool(detail.session.preferred_tool ?? '')
       setRenamingSessionId('')
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to open chat')
@@ -485,7 +486,7 @@ export default function ToolPlaygroundPage() {
           prevMessageCountRef.current = detail.session.messages?.length || 0
           setDraftMode(detail.session.mode || 'platform')
           setDraftModel(detail.session.model_name || models[0] || 'gpt-4o')
-          setDraftTool(detail.session.preferred_tool || '')
+          setDraftTool(detail.session.preferred_tool ?? '')
         } else {
           setSession(null)
           setDraftMode('platform')
@@ -502,7 +503,7 @@ export default function ToolPlaygroundPage() {
     if (!activeSessionId || !session) {
       if (patch.mode !== undefined) setDraftMode(patch.mode)
       if (patch.model_name !== undefined) setDraftModel(patch.model_name)
-      if (patch.preferred_tool !== undefined) setDraftTool(patch.preferred_tool || '')
+      if (patch.preferred_tool !== undefined) setDraftTool(patch.preferred_tool ?? '')
       return
     }
     setSession((prev) => (prev ? { ...prev, ...patch } : prev))
@@ -510,6 +511,7 @@ export default function ToolPlaygroundPage() {
     try {
       const response = await updateChatSession(activeSessionId, patch)
       setSession(response.session)
+      setDraftTool(response.session.preferred_tool ?? '')
       syncSessionPreview(activeSessionId, response.session)
     } catch {}
   }
@@ -560,7 +562,7 @@ export default function ToolPlaygroundPage() {
         content: trimmed,
         mode: currentMode,
         model_name: currentModel,
-        preferred_tool: currentTool || null,
+        preferred_tool: currentTool,
         enabled_tools: session?.enabled_tools || tools.map((tool) => tool.name),
       }, {
         onAssistantStart: (payload) => {
@@ -570,7 +572,7 @@ export default function ToolPlaygroundPage() {
               ...((prev?.messages || active.messages || [])),
               {
                 ...buildAssistantDraft(payload.message_id, payload.mode, payload.model_name),
-                preferred_tool: currentTool || '',
+                preferred_tool: currentTool ?? '',
               },
             ],
           }))
@@ -604,6 +606,7 @@ export default function ToolPlaygroundPage() {
         },
         onFinal: (payload) => {
           setSession(payload.session)
+          setDraftTool(payload.session.preferred_tool ?? '')
           prevMessageCountRef.current = payload.session.messages?.length || 0
           setSessions((prev) => [payload.session, ...prev.filter((item) => item.session_id !== payload.session.session_id)])
           setActiveSessionId(payload.session.session_id)
@@ -828,7 +831,7 @@ export default function ToolPlaygroundPage() {
         <div className="px-4 pb-5 pt-3 md:px-8">
           <div className="mx-auto max-w-4xl">
             <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(17,21,34,0.9),rgba(10,14,24,0.9))] shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
-              <div className="flex flex-wrap items-center gap-2 px-4 pt-4 md:px-5">
+              <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:px-5">
                 <CustomSelect
                   label="Mode"
                   value={currentMode}
@@ -852,7 +855,7 @@ export default function ToolPlaygroundPage() {
                   label="Tool"
                   value={currentTool}
                   options={toolOptions}
-                  onChange={(value) => patchSession({ preferred_tool: value || null })}
+                  onChange={(value) => patchSession({ preferred_tool: value })}
                   className="w-[186px] max-w-full"
                   buttonClassName="min-h-[38px] rounded-full px-3 py-1.5 text-xs"
                   menuPlacement="up"
@@ -868,14 +871,14 @@ export default function ToolPlaygroundPage() {
                   {uploading ? 'Uploading...' : `Files ${(session?.attachments || []).length ? `(${session.attachments.length})` : ''}`}
                 </button>
               </div>
-              <div className="px-4 pb-4 pt-2 md:px-5">
+              <div className="px-4 pb-3 pt-1 md:px-5">
                 <textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={placeholder}
                   rows={1}
-                  className="max-h-[180px] min-h-[44px] w-full resize-none overflow-y-auto bg-transparent px-1 py-2 text-[15px] leading-6 text-ink outline-none placeholder:text-[#8d97ab]"
+                  className="max-h-[140px] min-h-[36px] w-full resize-none overflow-y-auto bg-transparent px-1 py-1.5 text-[14px] leading-6 text-ink outline-none placeholder:text-[#8d97ab]"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
@@ -893,7 +896,7 @@ export default function ToolPlaygroundPage() {
                     type="button"
                     onClick={() => submit()}
                     disabled={busy || creating}
-                    className="inline-flex h-11 items-center gap-2 rounded-full bg-white px-5 text-sm font-medium text-black transition hover:opacity-90 disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-black transition hover:opacity-90 disabled:opacity-50"
                   >
                     {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}
                     {busy ? 'Streaming...' : 'Send'}

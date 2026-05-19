@@ -301,6 +301,7 @@ export default function WorkflowRunPage() {
   const canPause = run && ['running', 'resuming'].includes(run.status) && !control.pause_requested && !control.stop_requested
   const canStop = run && ['running', 'resuming', 'paused'].includes(run.status) && !control.stop_requested
   const canResume = run && ['paused', 'failed', 'stopped'].includes(run.status)
+  const resumeLabel = run?.status === 'stopped' ? 'Start' : 'Resume'
   const timing = run?.timing || {}
   const activeEstimate = timing.agent_estimates?.find((item) => item.step_number === run?.current_step)
 
@@ -330,7 +331,7 @@ export default function WorkflowRunPage() {
             )}
             {canResume && (
               <button onClick={manualResume} disabled={resuming} className="px-3 py-1.5 rounded-md border border-line bg-panel/80 text-sm hover:border-accent/40 inline-flex items-center gap-1.5 disabled:opacity-50">
-                <RefreshCcw size={13} /> {resuming ? 'Resuming...' : 'Resume'}
+                <RefreshCcw size={13} /> {resuming ? `${resumeLabel === 'Start' ? 'Starting' : 'Resuming'}...` : resumeLabel}
               </button>
             )}
             {report && (

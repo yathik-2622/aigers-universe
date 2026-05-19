@@ -105,6 +105,11 @@ def _normalize_tool_names(tool_names: list[str] | None) -> list[str]:
     return valid or CHAT_SAFE_TOOL_NAMES.copy()
 
 
+def _normalize_preferred_tool(tool_name: str | None) -> str | None:
+    candidate = (tool_name or "").strip()
+    return candidate if candidate in CHAT_SAFE_TOOL_NAMES else None
+
+
 def _make_title(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", text or "").strip()
     return (cleaned[:72] + "...") if len(cleaned) > 72 else (cleaned or "New AIger chat")
@@ -644,7 +649,7 @@ async def create_session(request: Request, body: ChatSessionCreateRequest):
         "title": (body.title or "New AIger chat").strip() or "New AIger chat",
         "mode": _normalize_mode(body.mode),
         "model_name": body.model_name or settings.LLM_MODEL,
-        "preferred_tool": body.preferred_tool if body.preferred_tool in CHAT_SAFE_TOOL_NAMES else None,
+        "preferred_tool": _normalize_preferred_tool(body.preferred_tool),
         "enabled_tools": _normalize_tool_names(body.enabled_tools),
         "attached_document_ids": [],
         "messages": [],
@@ -676,7 +681,7 @@ async def update_session(session_id: str, request: Request, body: ChatSessionUpd
     if body.model_name is not None:
         updates["model_name"] = body.model_name or settings.LLM_MODEL
     if body.preferred_tool is not None:
-        updates["preferred_tool"] = body.preferred_tool if body.preferred_tool in CHAT_SAFE_TOOL_NAMES else None
+        updates["preferred_tool"] = _normalize_preferred_tool(body.preferred_tool)
     if body.enabled_tools is not None:
         updates["enabled_tools"] = _normalize_tool_names(body.enabled_tools)
     await get_db().chat_sessions.update_one(
@@ -704,7 +709,7 @@ async def send_session_message(session_id: str, request: Request, body: ChatMess
     mode = _normalize_mode(body.mode or session.get("mode"))
     model_name = body.model_name or session.get("model_name") or settings.LLM_MODEL
     enabled_tools = _normalize_tool_names(body.enabled_tools or session.get("enabled_tools"))
-    preferred_tool = body.preferred_tool or session.get("preferred_tool")
+    preferred_tool = _normalize_preferred_tool(body.preferred_tool) if body.preferred_tool is not None else _normalize_preferred_tool(session.get("preferred_tool"))
     response_text, tool_results, processing_logs = await _run_chat_completion(
         user_id=user_id,
         session=session,
@@ -759,7 +764,7 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
         mode = _normalize_mode(body.mode or session.get("mode"))
         model_name = body.model_name or session.get("model_name") or settings.LLM_MODEL
         enabled_tools = _normalize_tool_names(body.enabled_tools or session.get("enabled_tools"))
-        preferred_tool = body.preferred_tool or session.get("preferred_tool")
+        preferred_tool = _normalize_preferred_tool(body.preferred_tool) if body.preferred_tool is not None else _normalize_preferred_tool(session.get("preferred_tool"))
         user_message = body.content.strip()
         assistant_message_id = str(uuid.uuid4())
         processing_logs: list[dict] = []
