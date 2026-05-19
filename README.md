@@ -71,6 +71,8 @@ For a deep engineering breakdown of the full stack, execution model, data flow, 
 
 For a full manual and platform-assisted end-to-end validation plan, read **[E2E_TESTING.md](./E2E_TESTING.md)**.
 
+For a browser-friendly QA handoff page, open **[docs/e2e-testing.html](./docs/e2e-testing.html)**.
+
 ---
 
 ## Visual tour

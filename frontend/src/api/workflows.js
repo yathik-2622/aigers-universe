@@ -7,5 +7,7 @@ export const autoBuildWorkflow = (body) => api.post('/workflows/auto-build', bod
 export const runWorkflow = (id, body) => api.post(`/workflows/${id}/run`, body).then(r => r.data)
 export const getRun = (runId) => api.get(`/workflows/runs/${runId}`).then(r => r.data)
 export const getRunReport = (runId) => api.get(`/workflows/runs/${runId}/report-materialized`).then(r => r.data)
+export const pauseRun = (runId) => api.post(`/workflows/runs/${runId}/pause`).then(r => r.data)
 export const resumeRun = (runId) => api.post(`/workflows/runs/${runId}/resume`).then(r => r.data)
+export const stopRun = (runId) => api.post(`/workflows/runs/${runId}/stop`).then(r => r.data)
 export const listAllRuns = () => api.get('/workflows/runs/all').then(r => r.data)
