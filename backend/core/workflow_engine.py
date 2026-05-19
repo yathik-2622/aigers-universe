@@ -197,6 +197,35 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
         error=result.get("error"),
     )
 
+    outputs = dict(state.get("outputs", {}))
+    agent_result_entry = {
+        "agent_id": agent_config["agent_id"],
+        "agent_name": agent_name,
+        "step_number": step_idx,
+        "status": result.get("status"),
+        "output": result.get("output", {}),
+        "tokens_used": result.get("tokens_used", 0),
+        "latency_ms": result.get("latency_ms", 0.0),
+        "tools_called": result.get("tools_called", []),
+        "completed_at": datetime.datetime.utcnow().isoformat(),
+        "error": result.get("error"),
+    }
+
+    if result.get("status") == "failed":
+        await db.workflow_runs.update_one(
+            {"run_id": run_id},
+            {
+                "$push": {"agent_results": agent_result_entry},
+                "$set": {
+                    "status": "failed",
+                    "failure_reason": result.get("error") or "Agent failure",
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                },
+            },
+        )
+        return {"outputs": outputs, "status": "failed", "failure_reason": result.get("error", "")}
+
+    outputs[agent_name] = result.get("output", {})
     next_agent_name = agents[step_idx + 1]["name"] if step_idx + 1 < len(agents) else "__end__"
     await send_a2a_message(
         from_agent=agent_name,
@@ -206,35 +235,13 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
         workflow_run_id=run_id,
     )
 
-    outputs = dict(state.get("outputs", {}))
-    outputs[agent_name] = result.get("output", {})
-
     await db.workflow_runs.update_one(
         {"run_id": run_id},
         {
-            "$push": {
-                "agent_results": {
-                    "agent_id": agent_config["agent_id"],
-                    "agent_name": agent_name,
-                    "step_number": step_idx,
-                    "status": result.get("status"),
-                    "output": result.get("output", {}),
-                    "tokens_used": result.get("tokens_used", 0),
-                    "latency_ms": result.get("latency_ms", 0.0),
-                    "tools_called": result.get("tools_called", []),
-                    "completed_at": datetime.datetime.utcnow().isoformat(),
-                }
-            },
+            "$push": {"agent_results": agent_result_entry},
             "$set": {"outputs_by_agent": outputs, "updated_at": datetime.datetime.utcnow().isoformat()},
         },
     )
-
-    if result.get("status") == "failed":
-        await db.workflow_runs.update_one(
-            {"run_id": run_id},
-            {"$set": {"status": "failed", "failure_reason": result.get("error") or "Agent failure"}},
-        )
-        return {"outputs": outputs, "status": "failed", "failure_reason": result.get("error", "")}
 
     run_doc = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0, "status": 1, "hitl_id": 1})
     if run_doc and run_doc.get("status") in ("paused", "resuming"):
@@ -335,10 +342,20 @@ async def _run_workflow_steps(state: WorkflowState, start_step: int = 0) -> None
 
 
 def _next_step_index(run: dict, agent_configs: list[dict]) -> int:
-    outputs = run.get("outputs_by_agent", {}) or {}
-    completed_names = {name for name in outputs.keys() if not name.endswith("_hitl")}
+    agent_results = run.get("agent_results", []) or []
+    latest_by_step: dict[int, dict] = {}
+    for item in agent_results:
+        step_number = item.get("step_number")
+        if isinstance(step_number, int):
+            latest_by_step[step_number] = item
+
     for idx, agent in enumerate(agent_configs):
-        if agent["name"] not in completed_names:
+        latest = latest_by_step.get(idx)
+        if not latest:
+            return idx
+        if latest.get("status") != "success":
+            return idx
+        if agent["name"] not in (run.get("outputs_by_agent", {}) or {}):
             return idx
     return len(agent_configs)
 
@@ -441,12 +458,13 @@ async def resume_workflow_run(run_id: str) -> dict:
     if not wf:
         raise ValueError(f"Workflow '{run['workflow_id']}' not found")
 
-    agent_configs: list[dict] = []
+    stored_agent_configs: list[dict] = []
     for agent_id in wf["agents"]:
         cfg = await agent_repo.get_by_id(agent_id)
         if not cfg:
             raise ValueError(f"Agent '{agent_id}' referenced in workflow not found")
-        agent_configs.append(cfg)
+        stored_agent_configs.append(cfg)
+    agent_configs = _resolve_agent_configs(wf, stored_agent_configs)
 
     start_step = _next_step_index(run, agent_configs)
     if start_step >= len(agent_configs):

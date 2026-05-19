@@ -31,13 +31,27 @@ def _make_crewai_tool(base_tool, tool):
     name = base_tool.name
     description = base_tool.description or name
 
-    @tool(name)
     async def _wrapped_tool(**kwargs):
+        """CrewAI tool wrapper."""
         result = await base_tool.ainvoke(kwargs)
         return result if isinstance(result, str) else json.dumps(result, default=str)
 
     _wrapped_tool.__doc__ = description
-    return _wrapped_tool
+    _wrapped_tool.__name__ = _safe_message_name(name)
+    return tool(name)(_wrapped_tool)
+
+
+def _usage_metric_value(usage_metrics, *names: str) -> int:
+    if not usage_metrics:
+        return 0
+    for name in names:
+        if isinstance(usage_metrics, dict):
+            value = usage_metrics.get(name, 0)
+        else:
+            value = getattr(usage_metrics, name, 0)
+        if value:
+            return int(value)
+    return 0
 
 
 def _make_agno_tool(base_tool, tool):
@@ -342,6 +356,10 @@ async def _run_crewai(
     selected_policy_ids: list[str],
 ) -> dict:
     os.environ.setdefault("CREWAI_STORAGE_DIR", "aigers-universe")
+    os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
+    os.environ.setdefault("CREWAI_TESTING", "true")
+    os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+    os.environ.setdefault("OTEL_SDK_DISABLED", "true")
     try:
         from crewai import Agent, Crew, LLM, Process, Task
         from crewai.tools import tool
@@ -375,13 +393,13 @@ async def _run_crewai(
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
     output = await crew.kickoff_async()
     content = getattr(output, "raw", None) or str(output)
-    usage_metrics = getattr(crew, "usage_metrics", None) or {}
+    usage_metrics = getattr(crew, "usage_metrics", None)
     return {
         "content": content,
         "tools_called": enabled_tools,
-        "tokens_used": int(usage_metrics.get("total_tokens", 0) or 0),
-        "prompt_tokens": int(usage_metrics.get("prompt_tokens", 0) or 0),
-        "completion_tokens": int(usage_metrics.get("completion_tokens", 0) or 0),
+        "tokens_used": _usage_metric_value(usage_metrics, "total_tokens"),
+        "prompt_tokens": _usage_metric_value(usage_metrics, "prompt_tokens", "input_tokens"),
+        "completion_tokens": _usage_metric_value(usage_metrics, "completion_tokens", "output_tokens"),
     }
 
 
