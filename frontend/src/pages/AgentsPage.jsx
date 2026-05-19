@@ -4,7 +4,9 @@ import { Check, Code2, Copy, Cpu, Download, Eye, Link2, Plus, Trash2, Workflow a
 import { toast } from 'sonner'
 import CodeSnippet from '../components/common/CodeSnippet.jsx'
 import ConfirmDialog from '../components/common/ConfirmDialog.jsx'
+import CustomSelect from '../components/common/CustomSelect.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
+import ModelBadge from '../components/common/ModelBadge.jsx'
 import { deleteAgent, exportAgentCode, listAgents, listModels, listTools, registerAgent } from '../api/platform.js'
 import { listAgentCards, validateRemoteCard } from '../api/a2a.js'
 
@@ -199,7 +201,7 @@ export default function AgentsPage() {
                 <div className="w-10 h-10 rounded-lg bg-accent/15 border border-accent/30 flex items-center justify-center shrink-0"><Cpu size={18} className="text-accent" /></div>
                 <div className="min-w-0">
                   <div className="font-display text-base font-semibold tracking-tight truncate">{a.name}</div>
-                  <div className="text-[11px] font-mono text-muted truncate">{a.model_name || 'gpt-4o'}</div>
+                  <div className="mt-1"><ModelBadge model={a.model_name || 'gpt-4o'} /></div>
                 </div>
               </div>
               <button onClick={() => setDeleteTarget(a.agent_id)} className="text-muted hover:text-bad p-1" data-testid={`delete-agent-${a.agent_id}`}><Trash2 size={14} /></button>
@@ -235,18 +237,26 @@ export default function AgentsPage() {
               </div>
               <div>
                 <label className="text-[11px] uppercase tracking-widest text-muted block mb-1">Framework</label>
-                <select value={form.framework} onChange={e => setForm(f => ({ ...f, framework: e.target.value }))} className="glass-select w-full px-3 py-2 text-sm focus:border-accent outline-none">
-                  <option value="langgraph">LangGraph</option>
-                  <option value="crewai">CrewAI</option>
-                  <option value="langchain">LangChain</option>
-                  <option value="agno">Agno</option>
-                </select>
+                <CustomSelect
+                  label="Framework"
+                  value={form.framework}
+                  onChange={(value) => setForm((f) => ({ ...f, framework: value }))}
+                  options={[
+                    { value: 'langgraph', label: 'LangGraph' },
+                    { value: 'crewai', label: 'CrewAI' },
+                    { value: 'langchain', label: 'LangChain' },
+                    { value: 'agno', label: 'Agno' },
+                  ]}
+                />
               </div>
               <div className="md:col-span-2">
                 <label className="text-[11px] uppercase tracking-widest text-muted block mb-1">Model</label>
-                <select value={form.model_name} onChange={e => setForm(f => ({ ...f, model_name: e.target.value }))} className="glass-select w-full px-3 py-2 text-sm focus:border-accent outline-none">
-                  {models.map(model => <option key={model} value={model}>{model}</option>)}
-                </select>
+                <CustomSelect
+                  label="Model"
+                  value={form.model_name}
+                  onChange={(value) => setForm((f) => ({ ...f, model_name: value }))}
+                  options={models}
+                />
               </div>
               <div className="md:col-span-2">
                 <label className="text-[11px] uppercase tracking-widest text-muted block mb-1">Description</label>
@@ -285,10 +295,15 @@ export default function AgentsPage() {
                     <input type="checkbox" checked={form.a2a_enabled} onChange={e => setForm(f => ({ ...f, a2a_enabled: e.target.checked }))} className="accent-accent" />
                     <span className="text-sm">A2A enabled</span>
                   </div>
-                  <select value={form.a2a_mode} onChange={e => setForm(f => ({ ...f, a2a_mode: e.target.value }))} className="glass-select w-full px-3 py-2 text-sm focus:border-accent outline-none">
-                    <option value="local">Local agent execution</option>
-                    <option value="remote">Remote A2A agent route</option>
-                  </select>
+                  <CustomSelect
+                    label="A2A mode"
+                    value={form.a2a_mode}
+                    onChange={(value) => setForm((f) => ({ ...f, a2a_mode: value }))}
+                    options={[
+                      { value: 'local', label: 'Local agent execution' },
+                      { value: 'remote', label: 'Remote A2A agent route' },
+                    ]}
+                  />
                 </div>
                 {form.a2a_mode === 'remote' && (
                   <div className="mt-3 space-y-2">
@@ -330,9 +345,13 @@ export default function AgentsPage() {
                 <div className="font-display text-lg font-semibold mt-1">{codeModal.agent?.name}</div>
               </div>
               <div className="flex items-center gap-2">
-                <select value={codeModal.framework} onChange={(e) => changeExportFramework(e.target.value)} className="rounded-md border border-line bg-elev/50 px-3 py-2 text-sm outline-none focus:border-accent/40">
-                  {EXPORT_FRAMEWORKS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
+                <CustomSelect
+                  label="Export framework"
+                  value={codeModal.framework}
+                  onChange={changeExportFramework}
+                  options={EXPORT_FRAMEWORKS}
+                  className="w-[220px]"
+                />
                 <button onClick={downloadCode} className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm text-white hover:opacity-90">
                   <Download size={14} /> Download
                 </button>

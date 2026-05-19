@@ -1,58 +1,987 @@
+import datetime
 import json
+import os
+import re
+import uuid
+from functools import lru_cache
+from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.document_router import (
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE_MB,
+    _extract_docx_text,
+    _extract_html_text,
+    _extract_json_text,
+    _extract_pdf_text,
+    _extract_xml_like_text,
+    _store_document_text,
+)
 from config import settings
-from core.agent_registry import TOOL_SCHEMAS
-from core.request_context import require_user_id
+from core.agent_registry import TOOL_SCHEMAS, invoke_agent_by_id
 from core.llm_router import _client
-from mcp_tools.tool_server import TOOL_REGISTRY
+from core.request_context import require_user_id
+from db.mongo_client import get_db
+from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
 
 router = APIRouter()
-SAFE_TOOL_NAMES = [name for name in TOOL_REGISTRY.keys() if name != "trigger_hitl"]
+
+PLATFORM_MODE = "platform"
+GENERAL_MODE = "general"
+CHAT_SAFE_TOOL_NAMES = [name for name in TOOL_REGISTRY.keys() if name != "trigger_hitl"]
+CHAT_NATIVE_TOOL_SCHEMAS = {
+    "search_platform_catalog": {
+        "type": "function",
+        "function": {
+            "name": "search_platform_catalog",
+            "description": "Search installed agents, marketplace templates, tools, and models inside this AIger's Universe workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    "invoke_installed_agent": {
+        "type": "function",
+        "function": {
+            "name": "invoke_installed_agent",
+            "description": "Invoke one installed agent with a specific prompt or task when the user explicitly wants help from that agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string"},
+                    "instruction": {"type": "string"},
+                },
+                "required": ["agent_id", "instruction"],
+            },
+        },
+    },
+}
 
 
-class ToolChatRequest(BaseModel):
-    messages: list[dict] = Field(default_factory=list)
+class ChatSessionCreateRequest(BaseModel):
+    title: str | None = Field(default=None)
+    mode: str = Field(default=PLATFORM_MODE)
+    model_name: str = Field(default=settings.LLM_MODEL)
     preferred_tool: str | None = Field(default=None)
+    enabled_tools: list[str] = Field(default_factory=list)
 
 
-async def _invoke_tool(name: str, args: dict) -> dict:
-    fn = TOOL_REGISTRY.get(name)
-    if not fn:
+class ChatMessageRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+    mode: str | None = Field(default=None)
+    model_name: str | None = Field(default=None)
+    preferred_tool: str | None = Field(default=None)
+    enabled_tools: list[str] | None = Field(default=None)
+
+
+class ChatSessionUpdateRequest(BaseModel):
+    title: str | None = Field(default=None)
+    mode: str | None = Field(default=None)
+    model_name: str | None = Field(default=None)
+    preferred_tool: str | None = Field(default=None)
+    enabled_tools: list[str] | None = Field(default=None)
+
+
+def _utcnow() -> str:
+    return datetime.datetime.utcnow().isoformat()
+
+
+def _normalize_mode(mode: str | None) -> str:
+    normalized = (mode or PLATFORM_MODE).strip().lower()
+    return normalized if normalized in {PLATFORM_MODE, GENERAL_MODE} else PLATFORM_MODE
+
+
+def _normalize_tool_names(tool_names: list[str] | None) -> list[str]:
+    if not tool_names:
+        return CHAT_SAFE_TOOL_NAMES.copy()
+    valid = [name for name in tool_names if name in CHAT_SAFE_TOOL_NAMES]
+    return valid or CHAT_SAFE_TOOL_NAMES.copy()
+
+
+def _make_title(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    return (cleaned[:72] + "...") if len(cleaned) > 72 else (cleaned or "New AIger chat")
+
+
+def _json_default(value):
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _truncate_text(value: str, limit: int = 280) -> str:
+    text = (value or "").strip()
+    return text if len(text) <= limit else f"{text[:limit].rstrip()}..."
+
+
+def _log_step(logs: list[dict], label: str, detail: str, status: str = "completed") -> None:
+    logs.append({
+        "step_id": str(uuid.uuid4()),
+        "label": label,
+        "detail": detail,
+        "status": status,
+        "timestamp": _utcnow(),
+    })
+
+
+def _sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=_json_default)}\n\n"
+
+
+@lru_cache(maxsize=1)
+def _platform_docs_bundle() -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    bundles: list[str] = []
+    for relative_path, label, limit in [
+        ("README.md", "README", 5000),
+        ("USER_GUIDE.md", "USER_GUIDE", 5000),
+        ("Technical_architecture.md", "TECHNICAL_ARCHITECTURE", 6500),
+        ("E2E_TESTING.md", "E2E_TESTING", 3500),
+    ]:
+        file_path = repo_root / relative_path
+        if not file_path.exists():
+            continue
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+        bundles.append(f"[{label}]\n{text[:limit]}")
+    return "\n\n".join(bundles)
+
+
+def _select_attachment_excerpt(doc: dict) -> str:
+    text = (doc.get("text") or "").strip()
+    max_chars = max(4000, min(settings.CHAT_INPUT_MAX_TEXT_CHARS, 12000))
+    return text[:max_chars]
+
+
+async def _load_session(session_id: str, user_id: str) -> dict:
+    session = await get_db().chat_sessions.find_one(
+        {"session_id": session_id, "owner_user_id": user_id},
+        {"_id": 0},
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found")
+    session.setdefault("messages", [])
+    session.setdefault("attached_document_ids", [])
+    session.setdefault("enabled_tools", CHAT_SAFE_TOOL_NAMES.copy())
+    return session
+
+
+async def _load_session_documents(session: dict) -> list[dict]:
+    ids = session.get("attached_document_ids") or []
+    if not ids:
+        return []
+    return await get_db().documents.find(
+        {"document_id": {"$in": ids}},
+        {"_id": 0, "vector_ids": 0},
+    ).sort("uploaded_at", 1).to_list(50)
+
+
+async def _serialize_session(session: dict) -> dict:
+    docs = await _load_session_documents(session)
+    return {
+        "session_id": session["session_id"],
+        "title": session.get("title") or "New AIger chat",
+        "mode": _normalize_mode(session.get("mode")),
+        "model_name": session.get("model_name") or settings.LLM_MODEL,
+        "preferred_tool": session.get("preferred_tool"),
+        "enabled_tools": session.get("enabled_tools") or CHAT_SAFE_TOOL_NAMES.copy(),
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "last_message_preview": session.get("last_message_preview", ""),
+        "messages": session.get("messages", []),
+        "attachments": [
+            {
+                "document_id": doc["document_id"],
+                "filename": doc.get("filename"),
+                "file_type": doc.get("file_type"),
+                "text_length": doc.get("text_length", 0),
+                "uploaded_at": doc.get("uploaded_at"),
+            }
+            for doc in docs
+        ],
+    }
+
+
+async def _search_platform_catalog(user_id: str, query: str) -> dict:
+    db = get_db()
+    normalized = (query or "").strip().lower()
+    installed = await db.agents.find(
+        {"owner_user_id": user_id, "status": "active"},
+        {"_id": 0, "agent_id": 1, "name": 1, "framework": 1, "description": 1, "tools": 1, "tags": 1},
+    ).to_list(200)
+    templates = await db.marketplace_templates.find(
+        {},
+        {"_id": 0, "template_id": 1, "name": 1, "framework": 1, "description": 1, "suggested_tools": 1, "tags": 1},
+    ).to_list(300)
+    tools = [{"name": name, **TOOL_METADATA.get(name, {})} for name in CHAT_SAFE_TOOL_NAMES]
+
+    def score_text(parts: list[str]) -> int:
+        haystack = " ".join(parts).lower()
+        if not normalized:
+            return 1
+        score = 0
+        for token in normalized.split():
+            if token in haystack:
+                score += 1
+        return score
+
+    ranked_agents = sorted(
+        [
+            {
+                "score": score_text([a.get("name", ""), a.get("description", ""), " ".join(a.get("tools", [])), " ".join(a.get("tags", []))]),
+                **a,
+            }
+            for a in installed
+        ],
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    ranked_templates = sorted(
+        [
+            {
+                "score": score_text([t.get("name", ""), t.get("description", ""), " ".join(t.get("suggested_tools", [])), " ".join(t.get("tags", []))]),
+                **t,
+            }
+            for t in templates
+        ],
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    ranked_tools = sorted(
+        [
+            {
+                "score": score_text([tool.get("name", ""), tool.get("description", ""), tool.get("category", "")]),
+                **tool,
+            }
+            for tool in tools
+        ],
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    return {
+        "query": query,
+        "installed_agents": [{k: v for k, v in item.items() if k != "score"} for item in ranked_agents[:10]],
+        "marketplace_templates": [{k: v for k, v in item.items() if k != "score"} for item in ranked_templates[:12]],
+        "tools": [{k: v for k, v in item.items() if k != "score"} for item in ranked_tools[:12]],
+        "models": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "o3",
+            "o4-mini",
+            "claude-3.7-sonnet",
+            "claude-sonnet-4.5",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "llama-3.3-70b-instruct",
+            "phi-4-reasoning",
+        ],
+    }
+
+
+async def _invoke_installed_agent(user_id: str, agent_id: str, instruction: str, session_id: str) -> dict:
+    agent = await get_db().agents.find_one(
+        {"owner_user_id": user_id, "agent_id": agent_id, "status": "active"},
+        {"_id": 0},
+    )
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Installed agent '{agent_id}' not found")
+    return await invoke_agent_by_id(
+        agent_config=agent,
+        input_data={"input": instruction, "source": "chat_copilot"},
+        workflow_run_id=f"chat_{session_id}",
+        step_number=0,
+    )
+
+
+async def _invoke_chat_tool(name: str, args: dict, user_id: str, session_id: str) -> dict:
+    try:
+        if name in TOOL_REGISTRY and name in CHAT_SAFE_TOOL_NAMES:
+            return await TOOL_REGISTRY[name](**args)
+        if name == "search_platform_catalog":
+            return await _search_platform_catalog(user_id=user_id, query=args.get("query", ""))
+        if name == "invoke_installed_agent":
+            return await _invoke_installed_agent(
+                user_id=user_id,
+                agent_id=args.get("agent_id", ""),
+                instruction=args.get("instruction", ""),
+                session_id=session_id,
+            )
         return {"error": f"Unknown tool '{name}'"}
-    return await fn(**args)
+    except Exception as exc:
+        return {
+            "error": str(exc),
+            "tool": name,
+            "args": args,
+        }
+
+
+def _extract_citations_from_tool_results(tool_results: list[dict]) -> list[dict]:
+    citations: list[dict] = []
+    seen: set[str] = set()
+    for item in tool_results:
+        tool_name = item.get("tool", "")
+        result = item.get("result") or {}
+        if isinstance(result, dict):
+            url = result.get("url")
+            excerpt = result.get("content") or result.get("excerpt") or result.get("snippet")
+            if url:
+                key = f"{tool_name}|{url}"
+                if key not in seen:
+                    seen.add(key)
+                    citations.append({
+                        "label": result.get("title") or result.get("provider_label") or tool_name,
+                        "url": url,
+                        "source_type": tool_name,
+                        "excerpt": _truncate_text(excerpt or url, 1200),
+                    })
+            for field in ("results", "matches", "installed_agents", "marketplace_templates", "tools"):
+                entries = result.get(field)
+                if not isinstance(entries, list):
+                    continue
+                for entry in entries[:8]:
+                    if not isinstance(entry, dict):
+                        continue
+                    entry_url = entry.get("url") or entry.get("link")
+                    entry_excerpt = entry.get("excerpt") or entry.get("snippet") or entry.get("description")
+                    if not entry_url and not entry_excerpt:
+                        continue
+                    key = f"{tool_name}|{entry_url or entry.get('title') or entry_excerpt[:60]}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    citations.append({
+                        "label": entry.get("title") or entry.get("name") or tool_name,
+                        "url": entry_url or "",
+                        "source_type": tool_name,
+                        "excerpt": _truncate_text(entry_excerpt or entry_url or "", 1200),
+                    })
+    return citations[:12]
+
+
+async def _build_platform_context(user_id: str, session: dict) -> str:
+    db = get_db()
+    installed_agents = await db.agents.find(
+        {"owner_user_id": user_id, "status": "active"},
+        {"_id": 0, "agent_id": 1, "name": 1, "framework": 1, "description": 1, "tools": 1, "tags": 1},
+    ).sort("created_at", -1).to_list(200)
+    marketplace_templates = await db.marketplace_templates.find(
+        {},
+        {"_id": 0, "template_id": 1, "name": 1, "framework": 1, "description": 1, "suggested_tools": 1, "tags": 1},
+    ).to_list(300)
+    tools = [{"name": name, **TOOL_METADATA.get(name, {})} for name in CHAT_SAFE_TOOL_NAMES]
+    docs = await _load_session_documents(session)
+
+    installed_summary = [
+        {
+            "agent_id": item.get("agent_id"),
+            "name": item.get("name"),
+            "framework": item.get("framework"),
+            "description": item.get("description", ""),
+            "tools": item.get("tools", []),
+            "tags": item.get("tags", []),
+        }
+        for item in installed_agents[:60]
+    ]
+    template_summary = [
+        {
+            "template_id": item.get("template_id"),
+            "name": item.get("name"),
+            "framework": item.get("framework"),
+            "description": item.get("description", ""),
+            "suggested_tools": item.get("suggested_tools", []),
+            "tags": item.get("tags", []),
+        }
+        for item in marketplace_templates[:80]
+    ]
+    attachments_summary = [
+        {
+            "document_id": doc.get("document_id"),
+            "filename": doc.get("filename"),
+            "file_type": doc.get("file_type"),
+            "excerpt": _select_attachment_excerpt(doc),
+        }
+        for doc in docs[:10]
+    ]
+
+    return "\n\n".join([
+        "PLATFORM_DOCS:\n" + _platform_docs_bundle(),
+        "INSTALLED_AGENTS:\n" + json.dumps(installed_summary, default=_json_default),
+        "MARKETPLACE_TEMPLATES:\n" + json.dumps(template_summary, default=_json_default),
+        "AVAILABLE_TOOLS:\n" + json.dumps(tools, default=_json_default),
+        "CHAT_ATTACHMENTS:\n" + json.dumps(attachments_summary, default=_json_default),
+    ])
+
+
+async def _generate_follow_up_questions(
+    *,
+    mode: str,
+    model_name: str,
+    user_message: str,
+    assistant_message: str,
+) -> list[str]:
+    system_prompt = (
+        "Generate exactly three concise follow-up questions a user might ask next. "
+        "Return only valid JSON in the form {\"questions\": [\"...\", \"...\", \"...\"]}. "
+        "Questions should be useful, specific, and non-repetitive."
+    )
+    if mode == PLATFORM_MODE:
+        system_prompt = (
+            "Generate exactly three concise follow-up questions a user might ask next about AIger's Universe, "
+            "its agents, workflows, tools, architecture, or how to use the platform for the current use case. "
+            "Return only valid JSON in the form {\"questions\": [\"...\", \"...\", \"...\"]}."
+        )
+    try:
+        response = await _client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"USER QUESTION:\n{user_message}\n\nASSISTANT ANSWER:\n{assistant_message[:5000]}"},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        payload = json.loads(response.choices[0].message.content or "{}")
+        questions = [str(item).strip() for item in payload.get("questions", []) if str(item).strip()]
+        return questions[:3]
+    except Exception:
+        return []
+
+
+def _system_prompt_for_mode(mode: str) -> str:
+    if mode == PLATFORM_MODE:
+        return (
+            "You are AIger Copilot inside the AIger's Universe platform. "
+            "Primary job: explain this exact platform, its architecture, agents, workflows, tools, A2A, KB, HITL, projects, reports, and operating patterns. "
+            "When the user describes a use case, map it to the platform using installed agents first, then marketplace templates, tools, workflow steps, inputs, HITL points, and expected outputs. "
+            "Be explicit about what exists now versus what would still need implementation. "
+            "Use provided platform context and chat attachments heavily. Do not invent capabilities that are not in the context. "
+            "If MCP tools or installed agents would improve the answer, call them. "
+            "If the user asks something far outside the product, answer briefly and suggest switching to General mode."
+        )
+    return (
+        "You are AIger General Chat. Help with broader reasoning, code generation, technical planning, and analysis. "
+        "You still operate inside AIger's Universe, so when the question touches this platform you must stay faithful to the supplied platform inventory. "
+        "Use tools when they materially improve accuracy. If attachments are present, analyze them directly. "
+        "Do not claim live external freshness unless a web-capable tool was actually used."
+    )
+
+
+def _prepare_conversation_messages(session: dict, user_message: str, platform_context: str, mode: str) -> list[dict]:
+    history = session.get("messages", [])[-18:]
+    base_messages = [
+        {"role": "system", "content": _system_prompt_for_mode(mode)},
+        {
+            "role": "system",
+            "content": (
+                "Platform context and attachments follow. Treat this as grounded workspace data.\n\n"
+                f"{platform_context[:42000]}"
+            ),
+        },
+    ]
+    for item in history:
+        base_messages.append({"role": item.get("role", "assistant"), "content": item.get("content", "")})
+    base_messages.append({"role": "user", "content": user_message})
+    return base_messages
+
+
+async def _run_chat_completion(
+    *,
+    user_id: str,
+    session: dict,
+    user_message: str,
+    mode: str,
+    model_name: str,
+    preferred_tool: str | None,
+    enabled_tools: list[str],
+) -> tuple[str, list[dict]]:
+    processing_logs: list[dict] = []
+    _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
+    platform_context = await _build_platform_context(user_id=user_id, session=session)
+    _log_step(processing_logs, "Ground workspace", "Loaded platform docs, installed agents, marketplace templates, tools, and chat attachments.")
+    messages = _prepare_conversation_messages(session, user_message, platform_context, mode)
+    _log_step(processing_logs, "Prepare prompt", f"Prepared {len(messages)} conversation messages for model inference.")
+    tools_payload = [TOOL_SCHEMAS[name] for name in enabled_tools if name in TOOL_SCHEMAS]
+    tools_payload.extend(CHAT_NATIVE_TOOL_SCHEMAS.values())
+    forced_tool = preferred_tool if preferred_tool in enabled_tools else None
+    _log_step(processing_logs, "Invoke model", f"Calling {model_name} with {len(tools_payload)} available tool definitions.")
+
+    response = await _client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        tools=tools_payload,
+        tool_choice={"type": "function", "function": {"name": forced_tool}} if forced_tool else "auto",
+        temperature=0.2,
+    )
+    msg = response.choices[0].message
+    tool_results: list[dict] = []
+    content = msg.content or ""
+
+    if msg.tool_calls:
+        followup_messages = list(messages)
+        assistant_tool_calls = []
+        for tc in msg.tool_calls:
+            args = json.loads(tc.function.arguments or "{}")
+            _log_step(processing_logs, "Run tool", f"{tc.function.name} called with structured arguments.")
+            result = await _invoke_chat_tool(tc.function.name, args, user_id=user_id, session_id=session["session_id"])
+            if isinstance(result, dict) and result.get("error"):
+                _log_step(processing_logs, "Tool fallback", f"{tc.function.name} failed safely: {result['error']}")
+            tool_results.append({"tool": tc.function.name, "args": args, "result": result})
+            assistant_tool_calls.append(
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": json.dumps(args, default=_json_default)},
+                }
+            )
+        followup_messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": assistant_tool_calls})
+        for idx, item in enumerate(tool_results):
+            tool_call_id = assistant_tool_calls[idx]["id"]
+            followup_messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(item["result"], default=_json_default)})
+        _log_step(processing_logs, "Synthesize answer", "Tool outputs returned. Generating grounded final response.")
+        second = await _client.chat.completions.create(model=model_name, messages=followup_messages, temperature=0.2)
+        content = second.choices[0].message.content or content or "Tool call completed."
+    else:
+        _log_step(processing_logs, "Synthesize answer", "Responded directly from conversation memory and grounded context.")
+
+    return content, tool_results, processing_logs
+
+
+async def _stream_llm_content(messages: list[dict], model_name: str):
+    stream = await _client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=0.2,
+        stream=True,
+    )
+    collected = ""
+    async for chunk in stream:
+        delta = ""
+        try:
+            delta = chunk.choices[0].delta.content or ""
+        except Exception:
+            delta = ""
+        if delta:
+            collected += delta
+            yield delta, collected
+
+
+async def _persist_session_message(
+    *,
+    session_id: str,
+    user_id: str,
+    user_message: str,
+    assistant_message: str,
+    tool_results: list[dict],
+    citations: list[dict],
+    processing_logs: list[dict],
+    follow_up_questions: list[str],
+    mode: str,
+    model_name: str,
+    preferred_tool: str | None,
+    enabled_tools: list[str],
+) -> dict:
+    now = _utcnow()
+    user_entry = {"message_id": str(uuid.uuid4()), "role": "user", "content": user_message, "created_at": now}
+    assistant_entry = {
+        "message_id": str(uuid.uuid4()),
+        "role": "assistant",
+        "content": assistant_message,
+        "tool_results": tool_results,
+        "citations": citations,
+        "processing_logs": processing_logs,
+        "follow_up_questions": follow_up_questions,
+        "created_at": now,
+        "mode": mode,
+        "model_name": model_name,
+        "preferred_tool": preferred_tool,
+    }
+    await get_db().chat_sessions.update_one(
+        {"session_id": session_id, "owner_user_id": user_id},
+        {
+            "$push": {"messages": {"$each": [user_entry, assistant_entry]}},
+            "$set": {
+                "updated_at": now,
+                "mode": mode,
+                "model_name": model_name,
+                "preferred_tool": preferred_tool,
+                "enabled_tools": enabled_tools,
+                "last_message_preview": assistant_message[:220],
+            },
+            "$inc": {"message_count": 2},
+        },
+    )
+    session = await _load_session(session_id, user_id)
+    return await _serialize_session(session)
+
+
+@router.get("/sessions")
+async def list_sessions(request: Request):
+    user_id = require_user_id(request)
+    sessions = await get_db().chat_sessions.find(
+        {"owner_user_id": user_id},
+        {"_id": 0, "messages": 0},
+    ).sort("updated_at", -1).to_list(200)
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+async def create_session(request: Request, body: ChatSessionCreateRequest):
+    user_id = require_user_id(request)
+    now = _utcnow()
+    session = {
+        "session_id": str(uuid.uuid4()),
+        "owner_user_id": user_id,
+        "title": (body.title or "New AIger chat").strip() or "New AIger chat",
+        "mode": _normalize_mode(body.mode),
+        "model_name": body.model_name or settings.LLM_MODEL,
+        "preferred_tool": body.preferred_tool if body.preferred_tool in CHAT_SAFE_TOOL_NAMES else None,
+        "enabled_tools": _normalize_tool_names(body.enabled_tools),
+        "attached_document_ids": [],
+        "messages": [],
+        "message_count": 0,
+        "last_message_preview": "",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await get_db().chat_sessions.insert_one(session)
+    return {"session": await _serialize_session(session)}
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, request: Request):
+    user_id = require_user_id(request)
+    session = await _load_session(session_id, user_id)
+    return {"session": await _serialize_session(session)}
+
+
+@router.put("/sessions/{session_id}")
+async def update_session(session_id: str, request: Request, body: ChatSessionUpdateRequest):
+    user_id = require_user_id(request)
+    await _load_session(session_id, user_id)
+    updates: dict = {"updated_at": _utcnow()}
+    if body.title is not None:
+        updates["title"] = body.title.strip() or "New AIger chat"
+    if body.mode is not None:
+        updates["mode"] = _normalize_mode(body.mode)
+    if body.model_name is not None:
+        updates["model_name"] = body.model_name or settings.LLM_MODEL
+    if body.preferred_tool is not None:
+        updates["preferred_tool"] = body.preferred_tool if body.preferred_tool in CHAT_SAFE_TOOL_NAMES else None
+    if body.enabled_tools is not None:
+        updates["enabled_tools"] = _normalize_tool_names(body.enabled_tools)
+    await get_db().chat_sessions.update_one(
+        {"session_id": session_id, "owner_user_id": user_id},
+        {"$set": updates},
+    )
+    session = await _load_session(session_id, user_id)
+    return {"session": await _serialize_session(session)}
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(session_id: str, request: Request):
+    user_id = require_user_id(request)
+    session = await _load_session(session_id, user_id)
+    doc_ids = session.get("attached_document_ids") or []
+    await get_db().chat_sessions.delete_one({"session_id": session_id, "owner_user_id": user_id})
+    if doc_ids:
+        await get_db().documents.delete_many({"document_id": {"$in": doc_ids}})
+
+
+@router.post("/sessions/{session_id}/message")
+async def send_session_message(session_id: str, request: Request, body: ChatMessageRequest):
+    user_id = require_user_id(request)
+    session = await _load_session(session_id, user_id)
+    mode = _normalize_mode(body.mode or session.get("mode"))
+    model_name = body.model_name or session.get("model_name") or settings.LLM_MODEL
+    enabled_tools = _normalize_tool_names(body.enabled_tools or session.get("enabled_tools"))
+    preferred_tool = body.preferred_tool or session.get("preferred_tool")
+    response_text, tool_results, processing_logs = await _run_chat_completion(
+        user_id=user_id,
+        session=session,
+        user_message=body.content.strip(),
+        mode=mode,
+        model_name=model_name,
+        preferred_tool=preferred_tool,
+        enabled_tools=enabled_tools,
+    )
+    citations = _extract_citations_from_tool_results(tool_results)
+    follow_up_questions = await _generate_follow_up_questions(
+        mode=mode,
+        model_name=model_name,
+        user_message=body.content.strip(),
+        assistant_message=response_text,
+    )
+    if not session.get("messages") and (session.get("title") or "").strip() == "New AIger chat":
+        await get_db().chat_sessions.update_one(
+            {"session_id": session_id, "owner_user_id": user_id},
+            {"$set": {"title": _make_title(body.content)}},
+        )
+    serialized = await _persist_session_message(
+        session_id=session_id,
+        user_id=user_id,
+        user_message=body.content.strip(),
+        assistant_message=response_text,
+        tool_results=tool_results,
+        citations=citations,
+        processing_logs=processing_logs,
+        follow_up_questions=follow_up_questions,
+        mode=mode,
+        model_name=model_name,
+        preferred_tool=preferred_tool if preferred_tool in enabled_tools else None,
+        enabled_tools=enabled_tools,
+    )
+    return {
+        "reply": response_text,
+        "tool_results": tool_results,
+        "citations": citations,
+        "processing_logs": processing_logs,
+        "follow_up_questions": follow_up_questions,
+        "session": serialized,
+    }
+
+
+@router.post("/sessions/{session_id}/stream")
+async def stream_session_message(session_id: str, request: Request, body: ChatMessageRequest):
+    user_id = require_user_id(request)
+
+    async def event_generator():
+        session = await _load_session(session_id, user_id)
+        mode = _normalize_mode(body.mode or session.get("mode"))
+        model_name = body.model_name or session.get("model_name") or settings.LLM_MODEL
+        enabled_tools = _normalize_tool_names(body.enabled_tools or session.get("enabled_tools"))
+        preferred_tool = body.preferred_tool or session.get("preferred_tool")
+        user_message = body.content.strip()
+        assistant_message_id = str(uuid.uuid4())
+        processing_logs: list[dict] = []
+
+        yield _sse_event("assistant_start", {"message_id": assistant_message_id, "mode": mode, "model_name": model_name})
+
+        _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
+        yield _sse_event("log", processing_logs[-1])
+
+        platform_context = await _build_platform_context(user_id=user_id, session=session)
+        _log_step(processing_logs, "Ground workspace", "Loaded platform docs, installed agents, marketplace templates, tools, and chat attachments.")
+        yield _sse_event("log", processing_logs[-1])
+
+        messages = _prepare_conversation_messages(session, user_message, platform_context, mode)
+        _log_step(processing_logs, "Prepare prompt", f"Prepared {len(messages)} conversation messages for model inference.")
+        yield _sse_event("log", processing_logs[-1])
+
+        tools_payload = [TOOL_SCHEMAS[name] for name in enabled_tools if name in TOOL_SCHEMAS]
+        tools_payload.extend(CHAT_NATIVE_TOOL_SCHEMAS.values())
+        forced_tool = preferred_tool if preferred_tool in enabled_tools else None
+
+        _log_step(processing_logs, "Invoke model", f"Calling {model_name} with {len(tools_payload)} available tool definitions.")
+        yield _sse_event("log", processing_logs[-1])
+
+        response = await _client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            tools=tools_payload,
+            tool_choice={"type": "function", "function": {"name": forced_tool}} if forced_tool else "auto",
+            temperature=0.2,
+        )
+        msg = response.choices[0].message
+        tool_results: list[dict] = []
+        final_content = ""
+
+        if msg.tool_calls:
+            followup_messages = list(messages)
+            assistant_tool_calls = []
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments or "{}")
+                _log_step(processing_logs, "Run tool", f"{tc.function.name} called with structured arguments.")
+                yield _sse_event("log", processing_logs[-1])
+                result = await _invoke_chat_tool(tc.function.name, args, user_id=user_id, session_id=session["session_id"])
+                if isinstance(result, dict) and result.get("error"):
+                    _log_step(processing_logs, "Tool fallback", f"{tc.function.name} failed safely: {result['error']}")
+                    yield _sse_event("log", processing_logs[-1])
+                tool_results.append({"tool": tc.function.name, "args": args, "result": result})
+                yield _sse_event("tool", {"tool": tc.function.name, "args": args, "result": result})
+                assistant_tool_calls.append(
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": json.dumps(args, default=_json_default)},
+                    }
+                )
+            followup_messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": assistant_tool_calls})
+            for idx, item in enumerate(tool_results):
+                followup_messages.append({"role": "tool", "tool_call_id": assistant_tool_calls[idx]["id"], "content": json.dumps(item["result"], default=_json_default)})
+            _log_step(processing_logs, "Synthesize answer", "Tool outputs returned. Streaming grounded final response.")
+            yield _sse_event("log", processing_logs[-1])
+            async for delta, collected in _stream_llm_content(followup_messages, model_name):
+                final_content = collected
+                yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
+        else:
+            _log_step(processing_logs, "Synthesize answer", "Streaming response from conversation memory and grounded context.")
+            yield _sse_event("log", processing_logs[-1])
+            async for delta, collected in _stream_llm_content(messages, model_name):
+                final_content = collected
+                yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
+
+        citations = _extract_citations_from_tool_results(tool_results)
+        follow_up_questions = await _generate_follow_up_questions(
+            mode=mode,
+            model_name=model_name,
+            user_message=user_message,
+            assistant_message=final_content,
+        )
+
+        if not session.get("messages") and (session.get("title") or "").strip() == "New AIger chat":
+            await get_db().chat_sessions.update_one(
+                {"session_id": session_id, "owner_user_id": user_id},
+                {"$set": {"title": _make_title(user_message)}},
+            )
+
+        serialized = await _persist_session_message(
+            session_id=session_id,
+            user_id=user_id,
+            user_message=user_message,
+            assistant_message=final_content,
+            tool_results=tool_results,
+            citations=citations,
+            processing_logs=processing_logs,
+            follow_up_questions=follow_up_questions,
+            mode=mode,
+            model_name=model_name,
+            preferred_tool=preferred_tool if preferred_tool in enabled_tools else None,
+            enabled_tools=enabled_tools,
+        )
+        yield _sse_event(
+            "final",
+            {
+                "message_id": assistant_message_id,
+                "reply": final_content,
+                "tool_results": tool_results,
+                "citations": citations,
+                "processing_logs": processing_logs,
+                "follow_up_questions": follow_up_questions,
+                "session": serialized,
+            },
+        )
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/upload", status_code=status.HTTP_201_CREATED)
+async def upload_session_files(
+    session_id: str,
+    request: Request,
+    files: list[UploadFile] = File(...),
+    category: str = Form(default="chat-input"),
+):
+    user_id = require_user_id(request)
+    session = await _load_session(session_id, user_id)
+    if not files:
+        raise HTTPException(status_code=422, detail="Select at least one file")
+    existing_count = len(session.get("attached_document_ids") or [])
+    if existing_count + len(files) > settings.CHAT_INPUT_MAX_FILES:
+        raise HTTPException(status_code=422, detail=f"Chat supports up to {settings.CHAT_INPUT_MAX_FILES} attached files")
+
+    prepared_files: list[dict] = []
+    total_bytes = 0
+    total_chars = 0
+    for file in files:
+        filename = file.filename or "unnamed"
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=415, detail=f"Unsupported file type '{ext}'. Allowed: {ALLOWED_EXTENSIONS}")
+        file_bytes = await file.read()
+        total_bytes += len(file_bytes)
+        if len(file_bytes) > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"File '{filename}' exceeds {MAX_FILE_SIZE_MB}MB limit")
+        try:
+            if ext == ".pdf":
+                text = _extract_pdf_text(file_bytes)
+            elif ext == ".docx":
+                text = _extract_docx_text(file_bytes)
+            elif ext in {".html", ".htm"}:
+                text = _extract_html_text(file_bytes)
+            elif ext == ".json":
+                text = _extract_json_text(file_bytes)
+            elif ext == ".xml":
+                text = _extract_xml_like_text(file_bytes)
+            else:
+                text = file_bytes.decode("utf-8", errors="ignore")
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Failed to extract text from '{filename}': {exc}") from exc
+        total_chars += len(text)
+        prepared_files.append({
+            "filename": filename,
+            "ext": ext,
+            "text": text,
+            "file_size_bytes": len(file_bytes),
+        })
+
+    if total_bytes > settings.CHAT_INPUT_MAX_TOTAL_BYTES:
+        raise HTTPException(status_code=413, detail=f"Combined chat upload exceeds {settings.CHAT_INPUT_MAX_TOTAL_BYTES} bytes")
+    if total_chars > settings.CHAT_INPUT_MAX_TEXT_CHARS:
+        raise HTTPException(status_code=413, detail=f"Combined extracted text exceeds {settings.CHAT_INPUT_MAX_TEXT_CHARS} characters")
+
+    uploaded: list[dict] = []
+    for item in prepared_files:
+        result = await _store_document_text(
+            request,
+            item["filename"],
+            item["ext"],
+            item["text"],
+            category,
+            scope="chat_input",
+            source_meta={"chat_session_id": session_id, "ingest_mode": "chat_upload"},
+            index_for_kb=False,
+            file_size_bytes=item["file_size_bytes"],
+        )
+        uploaded.append(result)
+
+    await get_db().chat_sessions.update_one(
+        {"session_id": session_id, "owner_user_id": user_id},
+        {
+            "$addToSet": {"attached_document_ids": {"$each": [item["document_id"] for item in uploaded]}},
+            "$set": {"updated_at": _utcnow()},
+        },
+    )
+    session = await _load_session(session_id, user_id)
+    return {"uploaded": uploaded, "session": await _serialize_session(session)}
 
 
 @router.post("/message")
-async def tool_chat(request: Request, body: ToolChatRequest):
-    require_user_id(request)
-    tools_payload = [TOOL_SCHEMAS[name] for name in SAFE_TOOL_NAMES if name in TOOL_SCHEMAS]
-    resp = await _client.chat.completions.create(
-        model=settings.LLM_MODEL,
-        messages=body.messages or [{"role": "user", "content": "List available tools and what they do."}],
-        tools=tools_payload,
-        tool_choice={"type": "function", "function": {"name": body.preferred_tool}} if body.preferred_tool in SAFE_TOOL_NAMES else "auto",
-        temperature=0.2,
+async def compatibility_message(request: Request, body: dict):
+    user_id = require_user_id(request)
+    session_doc = {
+        "title": _make_title((body.get("messages") or [{"content": "New AIger chat"}])[-1].get("content", "New AIger chat")),
+        "mode": body.get("mode") or GENERAL_MODE,
+        "model_name": body.get("model_name") or settings.LLM_MODEL,
+        "preferred_tool": body.get("preferred_tool"),
+        "enabled_tools": body.get("enabled_tools") or CHAT_SAFE_TOOL_NAMES.copy(),
+    }
+    create_response = await create_session(request, ChatSessionCreateRequest(**session_doc))
+    session = create_response["session"]
+    latest_user_content = ""
+    for item in body.get("messages") or []:
+        if item.get("role") == "user":
+            latest_user_content = item.get("content", latest_user_content)
+    if not latest_user_content:
+        latest_user_content = "List available tools and what they do."
+    response = await send_session_message(
+        session["session_id"],
+        request,
+        ChatMessageRequest(
+            content=latest_user_content,
+            mode=session_doc["mode"],
+            model_name=session_doc["model_name"],
+            preferred_tool=session_doc["preferred_tool"],
+            enabled_tools=session_doc["enabled_tools"],
+        ),
     )
-    msg = resp.choices[0].message
-    tool_results = []
-    if msg.tool_calls:
-        for tc in msg.tool_calls:
-            args = json.loads(tc.function.arguments or "{}")
-            result = await _invoke_tool(tc.function.name, args)
-            tool_results.append({"tool": tc.function.name, "args": args, "result": result})
-    content = msg.content or ""
-    if tool_results and not content:
-        followup_messages = list(body.messages)
-        followup_messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": f"call_{i}", "type": "function", "function": {"name": t["tool"], "arguments": json.dumps(t["args"])}} for i, t in enumerate(tool_results)],
-        })
-        for i, item in enumerate(tool_results):
-            followup_messages.append({"role": "tool", "tool_call_id": f"call_{i}", "content": json.dumps(item["result"], default=str)})
-        second = await _client.chat.completions.create(model=settings.LLM_MODEL, messages=followup_messages, temperature=0.2)
-        content = second.choices[0].message.content or ""
-    return {"reply": content, "tool_results": tool_results}
+    return {"reply": response["reply"], "tool_results": response["tool_results"], "session": response["session"]}

@@ -3,12 +3,16 @@ import { AlertTriangle, Check, MessageSquare, ShieldCheck, X } from 'lucide-reac
 import { getPending, approveHitl, rejectHitl, getAllHitl } from '../api/hitl.js'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 import { toast } from 'sonner'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 export default function HITLPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [pending, setPending] = useState([])
   const [history, setHistory] = useState([])
   const [notes, setNotes] = useState({})
   const [busy, setBusy] = useState(null)
+  const returnTo = searchParams.get('returnTo') || ''
 
   const load = async () => {
     try {
@@ -21,7 +25,12 @@ export default function HITLPage() {
 
   const approve = async (id) => {
     setBusy(id)
-    try { await approveHitl(id, notes[id] || ''); toast.success('Approved, workflow resuming'); load() }
+    try {
+      const result = await approveHitl(id, notes[id] || '')
+      toast.success('Approved, workflow resuming')
+      await load()
+      if (returnTo) navigate(returnTo, { replace: true, state: { resumedFromHitl: true, workflowRunId: result?.workflow_run_id || null } })
+    }
     catch { toast.error('Approve failed') }
     finally { setBusy(null) }
   }
@@ -80,6 +89,11 @@ export default function HITLPage() {
               className="w-full bg-white/5 border border-white/10 rounded-2xl px-3 py-3 text-[12px] font-mono focus:border-warn outline-none resize-none mb-3"
             />
             <div className="flex items-center gap-2">
+              {p.workflow_run_id && (
+                <Link to={`/runs/${p.workflow_run_id}`} className="px-3 py-2.5 rounded-full border border-white/10 bg-white/5 text-sm text-muted hover:text-ink hover:border-accent/40">
+                  Open run
+                </Link>
+              )}
               <button data-testid={`approve-${p.hitl_id}`} onClick={() => approve(p.hitl_id)} disabled={busy === p.hitl_id} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full bg-ok text-bg text-sm font-medium hover:opacity-90 disabled:opacity-50">
                 <Check size={14} /> Approve
               </button>

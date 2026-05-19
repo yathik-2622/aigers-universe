@@ -9,6 +9,26 @@ from db.mongo_client import get_db
 logger = structlog.get_logger(__name__)
 
 
+def _recommended_model_for_template(template: dict) -> str:
+    text = " ".join([
+        template.get("name", ""),
+        template.get("description", ""),
+        " ".join(template.get("tags", [])),
+        " ".join(template.get("suggested_tools", [])),
+        template.get("category", ""),
+    ]).lower()
+    framework = (template.get("framework") or "").lower()
+    if any(token in text for token in ["migration", "modernization", "spring", "java", "dotnet", "python", "portfolio", "strategy", "planner", "architect", "risk board"]):
+        return "gpt-5"
+    if any(token in text for token in ["compliance", "security", "policy", "governance", "risk", "review"]):
+        return "o3"
+    if framework in {"crewai", "agno"}:
+        return "gpt-4.1"
+    if any(token in text for token in ["extractor", "classifier", "mapper", "triager", "weather", "documentation"]):
+        return "gpt-4.1-mini"
+    return settings.LLM_MODEL
+
+
 MARKETPLACE_TEMPLATES = [
     {
         "template_id": "tpl_doc_classifier",
@@ -225,7 +245,7 @@ async def run_seed() -> None:
     db = get_db()
 
     for tpl in MARKETPLACE_TEMPLATES:
-        tpl["default_model_name"] = settings.LLM_MODEL
+        tpl["default_model_name"] = tpl.get("default_model_name") or _recommended_model_for_template(tpl)
         await db.marketplace_templates.update_one(
             {"template_id": tpl["template_id"]},
             {"$set": tpl},

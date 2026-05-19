@@ -7,6 +7,7 @@ import { listProjects } from '../api/projects.js'
 import { listAgents } from '../api/platform.js'
 import { importGithubRepo, importWorkflowGithubRepo, uploadDocument, uploadWorkflowInput, listDocuments } from '../api/documents.js'
 import { autoBuildWorkflow, createWorkflow, getWorkflow, runWorkflow } from '../api/workflows.js'
+import CustomSelect from '../components/common/CustomSelect.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
@@ -376,10 +377,15 @@ export default function WorkflowBuilderPage() {
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Project</div>
         <div className="rounded-xl border border-line bg-elev/40 px-3 py-3 mb-6">
           <div className="flex items-center gap-2 text-sm mb-2"><Briefcase size={14} className="text-accent" /> Project scope</div>
-          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setCurrentProjectId(e.target.value) }} className="glass-select w-full px-3 py-2 text-sm outline-none focus:border-accent/40">
-            <option value="">No project</option>
-            {projects.map((project) => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
-          </select>
+          <CustomSelect
+            label="Project"
+            value={projectId}
+            onChange={(value) => { setProjectId(value); setCurrentProjectId(value) }}
+            options={[
+              { value: '', label: 'No project' },
+              ...projects.map((project) => ({ value: project.project_id, label: project.name })),
+            ]}
+          />
         </div>
 
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Workflow inputs</div>
@@ -422,19 +428,31 @@ export default function WorkflowBuilderPage() {
         )}
 
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Knowledge base</div>
-        <select value={kbMode} onChange={(e) => setKbMode(e.target.value)} className="glass-select w-full px-3 py-2 text-sm outline-none focus:border-accent/40 mb-3">
-          <option value="upload">Upload KB files</option>
-          <option value="github">Use external GitHub repo context</option>
-          <option value="tools">Rely on external MCP/web tools</option>
-        </select>
-        <select value={docCategory} onChange={(e) => setDocCategory(e.target.value)} className="glass-select w-full px-3 py-2 text-sm outline-none focus:border-accent/40 mb-3">
-          <option value="general">General</option>
-          <option value="modernization">Modernization</option>
-          <option value="architecture">Architecture</option>
-          <option value="compliance">Compliance</option>
-          <option value="contracts">Contracts</option>
-          <option value="repo-context">Repo Context</option>
-        </select>
+        <CustomSelect
+          label="KB mode"
+          value={kbMode}
+          onChange={setKbMode}
+          options={[
+            { value: 'upload', label: 'Upload KB files' },
+            { value: 'github', label: 'Use external GitHub repo context' },
+            { value: 'tools', label: 'Rely on external MCP/web tools' },
+          ]}
+          className="mb-3"
+        />
+        <CustomSelect
+          label="KB category"
+          value={docCategory}
+          onChange={setDocCategory}
+          options={[
+            'general',
+            'modernization',
+            'architecture',
+            'compliance',
+            'contracts',
+            'repo-context',
+          ].map((value) => ({ value, label: value === 'repo-context' ? 'Repo Context' : `${value.charAt(0).toUpperCase()}${value.slice(1)}` }))}
+          className="mb-3"
+        />
         {kbMode === 'upload' && (
           <>
             <input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md,.json,.html,.xml,.yaml,.yml,.py,.js,.ts,.tsx,.jsx,.java,.go,.rb,.sql,.toml,.ini,.cfg" onChange={handleUpload} className="hidden" data-testid="doc-upload-input" />
@@ -455,7 +473,7 @@ export default function WorkflowBuilderPage() {
         )}
         {kbMode === 'tools' && (
           <div className="text-[11px] text-muted rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-            This workflow will rely on external MCP and realtime tools instead of a new KB upload. Configure tools on agent nodes, including `knowledge_base_search` when needed, from the builder and MCP Studio.
+            This workflow will rely on external MCP and realtime tools instead of a new KB upload. Configure tools on agent nodes, including `knowledge_base_search` when needed, from the builder and AIger Copilot.
           </div>
         )}
         {docs.length > 0 && (
@@ -476,7 +494,7 @@ export default function WorkflowBuilderPage() {
         )}
 
         <button onClick={() => navigate('/tools-chat')} className="mt-6 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-left hover:border-accent/40">
-          Open MCP Studio to manage KB uploads, GitHub imports, and live tool testing.
+          Open AIger Copilot to manage live MCP tool testing and use the dedicated KB or workflow-input panels here for document context.
         </button>
       </aside>
 

@@ -2,18 +2,21 @@
 
 ## 1. Purpose
 
-This document explains how to test AIger's Universe:
+This document covers only end-to-end testing of AIger's Universe across the real platform surfaces:
 
-- manually through the UI
-- through platform-assisted automatic flows inside the UI
-- through backend smoke checks
-- through regression scenarios covering the highest-value product paths
+- authentication and workspace entry
+- marketplace and agent availability
+- workflow builder and orchestrator
+- workflow inputs and reusable KB
+- remote A2A validation
+- workflow execution, HITL, observability, and reports
+- AIger Copilot with live reasoning trace
 
 ---
 
-## 2. Test Environment Prerequisites
+## 2. Environment Setup
 
-## 2.1 Backend
+### 2.1 Backend prerequisites
 
 Set these in `backend/.env`:
 
@@ -25,13 +28,13 @@ Set these in `backend/.env`:
 - `DB_NAME`
 - `JWT_SECRET`
 
-Recommended extras:
+Recommended:
 
-- `GITHUB_TOKEN` for private repos or stronger public-repo rate limits
+- `GITHUB_TOKEN` for stronger GitHub import limits
 - `A2A_SHARED_SECRET=change-this-local-a2a-secret`
 - `A2A_PUBLIC_BASE_URL=http://localhost:8001`
 
-## 2.2 Start services
+### 2.2 Start services
 
 Backend:
 
@@ -49,23 +52,23 @@ yarn start
 
 ---
 
-## 3. Fast Smoke Checklist
+## 3. Initial Smoke Entry
 
-Before deep testing, confirm:
+Confirm the following before deeper testing:
 
 1. Login page opens.
-2. Dashboard opens after login.
+2. Dashboard loads after login.
 3. Marketplace templates are visible.
-4. Agents page shows cards.
-5. Builder page loads ReactFlow.
-6. A2A cards endpoint is reachable indirectly through the UI helper.
-7. Run page opens and streams updates.
+4. Agents page loads installed cards.
+5. Workflow Builder loads ReactFlow.
+6. AIger Copilot opens.
+7. Run page opens and can stream updates.
 
 ---
 
-## 4. Manual End-to-End UI Flows
+## 4. End-to-End UI Flows
 
-## 4.1 Flow A: Agent installation and validation
+## 4.1 Marketplace to installed agent flow
 
 1. Open `Marketplace`.
 2. Install:
@@ -73,110 +76,112 @@ Before deep testing, confirm:
    - `Java to Python Service Translator`
    - `Risk Analyzer`
    - `Compliance Checker`
+   - `Recommendation Advisor`
 3. Open `Agents`.
 4. Verify installed cards show:
    - framework badge
-   - model name
+   - model badge
    - tags
-   - A2A badge if enabled
-5. Open `Local agent cards`.
-6. Copy one card URL.
-7. Click `New agent`.
-8. Choose:
-   - any framework
-   - `A2A enabled = true`
-   - `A2A mode = Remote`
-9. Paste the copied card URL.
-10. Click `Test remote card`.
-11. Confirm the validation summary appears.
-12. Save the agent.
+   - A2A state when enabled
 
-Expected result:
+Expected:
 
-- remote card validation succeeds
-- the new agent saves
-- no modal height overlap occurs
+- install succeeds without duplicate confusion
+- installed cards render correctly
 
 ---
 
-## 4.2 Flow B: Project-scoped workflow
+## 4.2 Local card to remote A2A flow
+
+1. In `Agents`, open `Local agent cards`.
+2. Copy one local card URL.
+3. Click `New agent`.
+4. Set:
+   - `A2A enabled = true`
+   - `A2A mode = Remote`
+5. Paste the copied URL.
+6. Click `Test remote card`.
+7. Save the agent.
+
+Expected:
+
+- remote card validation succeeds
+- summary appears before save
+- saved agent shows remote A2A state
+
+---
+
+## 4.3 Project-scoped workflow flow
 
 1. Open `Projects`.
 2. Create a project called `Wave 1`.
-3. Optionally add member emails.
-4. Open `Workflow Builder`.
-5. In `Project scope`, choose `Wave 1`.
-6. Give the workflow a name like `Wave 1 Modernization`.
-7. Save later after building.
+3. Open `Workflow Builder`.
+4. In `Project scope`, choose `Wave 1`.
+5. Name the workflow `Wave 1 Modernization`.
 
-Expected result:
+Expected:
 
-- project appears in dropdown
-- selected project persists in builder context
+- project appears in selector
+- selection persists in builder state
 
 ---
 
-## 4.3 Flow C: Orchestrator AI decision cycle
+## 4.4 Orchestrator planning flow
 
 1. In `Workflow Builder`, enter:
 
    `Modernize this Java monolith into Spring Boot services, assess migration risk, and produce a phased remediation backlog.`
 
 2. Click `Auto-build workflow`.
-3. In the planner modal, test:
+3. In the planner modal test:
    - `Edit`
    - `Replan`
    - `Reject`
-4. Re-open planning.
+4. Plan again.
 5. Click `Accept`.
 
-Expected result:
+Expected:
 
-- planner modal supports all decision actions
-- `Accept` closes the modal
-- workflow slow-build animation starts after modal close
-- camera focus follows each node as it is added
+- planner modal supports all actions
+- accepted plan closes modal first
+- workflow animates onto canvas
+- focus follows active node during construction
 
 ---
 
-## 4.4 Flow D: Workflow input and KB behavior
+## 4.5 Workflow input versus KB flow
 
 ### Run-scoped workflow inputs
 
-1. In `Workflow inputs`, type a detailed prompt.
-2. Select one or more files.
-3. Click `Upload workflow files`.
-4. Enter a public GitHub repo URL.
-5. Click `Import GitHub repo for this workflow run`.
+1. In `Workflow inputs`, enter a run prompt.
+2. Upload one or more files.
+3. Import one public GitHub repo into workflow inputs.
 
-Expected result:
+Expected:
 
-- file upload button only shows file-upload loading
-- repo import button only shows repo-import loading
-- uploaded files appear in the workflow input list
-- imported workflow repo appears separately
+- file upload and repo import have separate states
+- uploaded files appear in workflow input list
+- imported repo appears separately
+- workflow inputs do not merge into KB
 
 ### Reusable KB
 
-1. In `Knowledge base`, keep `Upload KB files`.
-2. Upload a reusable architecture doc.
-3. Switch to `Use external GitHub repo context`.
-4. Import a separate repo into KB.
+1. In `Knowledge base`, upload one reusable architecture or policy document.
+2. Switch KB mode to GitHub and import a separate repo into KB.
 
-Expected result:
+Expected:
 
-- KB uploads are independent from workflow input uploads
-- KB items appear in the KB document list
-- workflow inputs remain separate
+- KB items remain separate from workflow inputs
+- KB list updates correctly
 
 ---
 
-## 4.5 Flow E: Manual drag-drop workflow
+## 4.6 Manual builder flow
 
-1. Drag two installed agents to canvas manually.
+1. Drag two installed agents to canvas.
 2. Connect them with an edge.
-3. Click each node.
-4. Adjust:
+3. Open each node config.
+4. Change:
    - prompt
    - model
    - tools
@@ -184,302 +189,254 @@ Expected result:
    - A2A mode
 5. Save workflow.
 
-Expected result:
+Expected:
 
-- node config persists
-- canvas saves correctly
-- badges and routing state reflect node edits
+- node configuration persists
+- workflow saves successfully
+- node state reflects edits
 
 ---
 
-## 4.6 Flow F: Modernization run
+## 4.7 Modernization run flow
 
-1. Use orchestrator-built workflow or manual workflow.
+1. Use an orchestrator-built or manual workflow.
 2. Add:
    - text goal
    - one Java file
    - one public Java repo import
-   - optional KB architecture doc
+   - optional KB architecture document
 3. Click `Run workflow`.
 
-Expected run-page validations:
+Expected on run page:
 
-1. current running node is camera-focused
-2. A2A messages appear on the right
-3. A2A messages expand and collapse on click
-4. statuses progress correctly
-5. if the report is not fully persisted yet, the page shows `Preparing report...`
-6. `View report` should work directly from the run page after the terminal step
+1. active node is visually focused
+2. statuses progress correctly
+3. A2A messages appear and expand
+4. report preparation state appears if needed
+5. final report opens directly from the run page
 
 Expected output:
 
 - architecture findings
 - risk findings
 - remediation backlog
-- report with highlighted sections and syntax-colored code blocks
+- readable report with citations and code blocks
 
 ---
 
-## 4.7 Flow G: Contract risk run
+## 4.8 Contract and compliance flow
 
 1. In `Orchestrator AI`, enter:
 
    `Review this vendor contract for key extraction, operational risk, compliance issues, and a final approval recommendation.`
 
-2. Click `Auto-build workflow`.
+2. Auto-build the workflow.
 3. Accept the plan.
-4. Upload a contract PDF, DOCX, or TXT.
+4. Upload a contract file.
 5. Run the workflow.
 
-Expected result:
+Expected:
 
-- extraction agent executes
-- risk agent executes
-- compliance may trigger HITL
-- final recommendation is generated
-- report is viewable from the run page itself
+- extraction agent runs
+- risk agent runs
+- compliance can trigger HITL
+- recommendation is produced
+- report is viewable from the run page
 
 ---
 
-## 4.8 Flow H: HITL approval cycle
+## 4.9 HITL pause and return flow
 
-1. Build or run a workflow with `Compliance Checker`.
-2. Use an input likely to trigger a high-severity policy issue.
-3. Wait for the run to pause.
-4. Open `HITL`.
-5. Approve once.
-6. Repeat with another run and reject once.
+1. Run a workflow likely to trigger `Compliance Checker`.
+2. Wait for pause.
+3. Open `HITL`.
+4. Approve one run.
+5. Repeat and reject another run.
+6. From the live run page, use the HITL shortcut and approve there as well.
 
-Expected result:
+Expected:
 
-- paused run is visible in HITL
+- paused runs appear in HITL
 - approval resumes execution
-- rejection marks run failed
+- rejection fails the run appropriately
+- return-to-run behavior sends the operator back to the same run page
 
 ---
 
-## 4.9 Flow I: Report validation
+## 4.10 AIger Copilot end-to-end flow
 
-1. Finish any workflow.
-2. Immediately click `View report` from the run page.
-3. Confirm it opens even if report persistence is still catching up.
-4. Verify:
+1. Open `AIger Copilot`.
+2. Confirm:
+   - history rail on the left
+   - central chat surface
+   - mode, model, tool, and file controls in the composer
+3. Start a new `AIger Copilot` mode chat.
+4. Ask:
+
+   `For a Java modernization use case, which agents should I install, which MCP tools should I enable, and what workflow should I build in this platform?`
+
+5. Verify the answer references:
+   - installed agents when available
+   - marketplace templates when agents are missing
+   - MCP tools by name
+   - suggested workflow steps
+6. Change model and preferred tool.
+7. Attach 2 to 3 files and ask a grounded follow-up.
+8. Start another chat in `General Reasoning` mode.
+9. Reopen chats from history.
+10. Rename one chat.
+11. Delete one chat.
+
+Expected:
+
+- session persistence works
+- history actions work without overlap
+- platform mode stays grounded in AIger capabilities
+- general mode can answer broader questions
+- tool activity appears inline when tools are called
+
+---
+
+## 4.11 Copilot reasoning trace flow
+
+1. In AIger Copilot, ask a prompt likely to trigger grounding or tool use.
+2. While the answer is generating, confirm there is no placeholder text such as `Waiting for response`.
+3. Open the reasoning section.
+4. Confirm logs are open by default while work is active.
+5. Collapse the reasoning section.
+6. Reopen it while the same response is still running.
+7. Click `Open live trace`.
+8. Keep the modal open while the backend continues processing.
+
+Expected:
+
+- reasoning logs update dynamically from the real backend stream
+- closing the inline log only collapses the view, not the process
+- reopening shows the latest real logs
+- live trace modal shows the current active backend activity and the full log trail
+- mode, model, and tool tags appear only after the response finishes
+
+---
+
+## 4.12 Report validation flow
+
+1. Complete any workflow run.
+2. Immediately open the report from the run page.
+3. Verify:
    - headings are styled
-   - callout lines are highlighted
+   - callouts are readable
    - code blocks are syntax-colored
-   - citations open correctly
-   - PII findings render clearly
+   - citations open
+   - report is available even if materialization was still finishing
 
-Expected result:
+Expected:
 
-- no `Report unavailable` experience right after completion
-- no need to leave the run page and reopen history
-
----
-
-## 5. Platform-Assisted Automatic UI Flows
-
-This section covers "automatic via UI" testing, meaning the platform itself performs the orchestration without external scripts.
-
-## 5.1 Automatic flow: planner-driven build
-
-1. Enter a workflow goal.
-2. Click `Auto-build workflow`.
-3. If missing agents are listed, click `Install required agents and build workflow`.
-4. Accept the planner.
-
-Platform performs automatically:
-
-- capability matching
-- missing-template discovery
-- template installation
-- node and edge creation
-- animated workflow construction
-
-## 5.2 Automatic flow: run monitoring
-
-Once a workflow is started, the UI automatically:
-
-- streams run status via SSE
-- falls back to polling if stream drops
-- tracks current running step
-- focuses the active node
-- updates A2A messages
-- tries to fetch the final report
+- no broken report experience right after completion
 
 ---
 
-## 6. Backend/API Smoke Tests
+## 5. Backend Verification For E2E Support
 
-These are optional but useful.
+Use these only to support the full platform run, not as substitutes for the UI flow.
 
-### 6.1 Health
+### 5.1 Health
 
 ```bash
 curl http://localhost:8001/api/health
 ```
 
-### 6.2 Marketplace
+### 5.2 Marketplace availability
 
 ```bash
 curl http://localhost:8001/api/marketplace/templates
 ```
 
-### 6.3 A2A cards
+### 5.3 A2A cards
 
 ```bash
 curl http://localhost:8001/api/a2a/agents/cards
 ```
 
-### 6.4 Materialized report endpoint
-
-After a run completes:
+### 5.4 Report materialization
 
 ```bash
 curl http://localhost:8001/api/workflows/runs/<RUN_ID>/report-materialized
 ```
 
-Expected result:
+Expected:
 
-- endpoint returns markdown even if the report was not persisted yet at first call
+- each endpoint supports the corresponding end-to-end path
 
 ---
 
-## 7. Regression Matrix
+## 6. Demo Testing Kit
 
-Use this after major changes.
+These repos align with the migration-oriented agents already seeded in the platform.
 
-### Core
+### 6.1 Java and Spring demos
+
+- `https://github.com/mybatis/jpetstore-6`
+- `https://github.com/spring-projects/spring-petclinic`
+
+Prompt examples:
+
+- `Modernize this Java codebase into Spring Boot services, identify risky dependencies, propose service boundaries, and produce a phased remediation backlog.`
+- `Analyze this Spring Boot application and propose bounded contexts, extraction candidates, target service contracts, and cutover sequencing.`
+
+### 6.2 Streamlit and frontend demos
+
+- `https://github.com/streamlit/streamlit-example`
+- `https://github.com/gothinkster/react-redux-realworld-example-app`
+
+Prompt examples:
+
+- `Convert this Streamlit app into a Next.js experience with route map, server/client split, API contracts, and rollout sequence.`
+- `Upgrade this React SPA to Next.js and propose routing changes, SSR or ISR opportunities, data-fetching changes, and deployment caveats.`
+
+### 6.3 .NET demo
+
+- `https://github.com/dotnet-architecture/eShopOnWeb`
+
+Prompt example:
+
+- `Migrate this .NET application toward Python APIs and return endpoint mapping, auth changes, serialization differences, runtime replacements, and release risks.`
+
+### 6.4 Python architecture demo
+
+- `https://github.com/fastapi/full-stack-fastapi-template`
+
+Prompt example:
+
+- `Analyze this Python platform structure and propose modernization, service boundaries, operational risks, and delivery priorities.`
+
+### 6.5 Repo plus design document demo
+
+1. Import one GitHub repo into `Workflow inputs`.
+2. Upload one design document, architecture note, or migration brief into `Workflow inputs`.
+3. Use a prompt like:
+
+   `Use this design document and the imported repository together to identify architecture drift, modernization risks, target boundaries, and rollout phases.`
+
+Expected:
+
+- repo and document remain visible as separate workflow inputs
+- outputs combine repository evidence with uploaded-document context
+
+---
+
+## 7. End-to-End Completion Checklist
 
 - login works
-- dashboard loads
-- marketplace installs succeed
-- agents create/update/delete works
-- builder drag-drop works
-- orchestrator auto-build works
-- planner modal actions work
+- marketplace installs work
+- agents page renders correctly
+- remote A2A validation works
 - project selection persists
-
-### Inputs
-
-- KB upload works
-- KB GitHub import works
-- workflow file upload works
-- workflow repo import works
-- limits are enforced
-
-### Runtime
-
-- workflow run starts
-- A2A messages persist
-- traces persist
-- remote A2A routing works
-- HITL pause/resume works
-- report opens from live run page
-
-### UX
-
-- create-agent modal does not overflow badly
-- builder sidebar is not congested
-- active node focus works during build
-- active node focus works during run
-- code snippet colors remain visible
-- report is readable and highlighted
-
----
-
-## 8. Known Current Product Boundaries
-
-### Supported well today
-
-- multi-agent orchestration
-- migration planning
-- contract review
-- KB retrieval
-- remote A2A delegation
-- human approval checkpoints
-
-### Not yet fully productized
-
-- automatic generation of a full translated target repository and publishing it to GitHub
-- automatic conversion of an entire source repo into a committed target repo artifact
-- automatic schema migration artifact publishing to a real target database repo
-
----
-
-## 9. Recommended High-Value Test Use Cases
-
-### Use case 1: Java to Spring Boot modernization
-
-Inputs:
-
-- legacy Java file
-- architecture note
-- public repo
-
-Expected:
-
-- module boundaries
-- risky dependencies
-- migration phases
-- release plan
-
-### Use case 2: Java to Python translation strategy
-
-Inputs:
-
-- Java service repo
-- concurrency-heavy Java file
-
-Expected:
-
-- Python framework mapping
-- runtime difference analysis
-- translation risks
-
-### Use case 3: Contract risk and compliance
-
-Inputs:
-
-- vendor agreement
-- internal policy doc
-
-Expected:
-
-- extracted entities
-- risk score
-- compliance issues
-- HITL when needed
-
-### Use case 4: MySQL to PostgreSQL migration planning
-
-Inputs:
-
-- schema SQL file
-- database conventions document
-
-Expected:
-
-- type mapping risks
-- compatibility issues
-- migration checklist
-- manual conversion guidance
-
----
-
-## 10. Recommended Future Automated Testing
-
-If you want true external automated UI regression later:
-
-- add Playwright for browser E2E
-- seed deterministic test data
-- mock or stub LLM gateway responses for stable CI
-- keep a separate live-key integration suite for final validation
-
-Current product-assisted "automatic" mode already covers:
-
-- auto-build
-- auto-install missing agents
-- guided run streaming
-- live report materialization
-
+- builder drag-drop works
+- orchestrator planning works
+- workflow inputs and KB stay separate
+- workflow execution streams correctly
+- HITL pause and resume work
+- report opens from run page
+- Copilot sessions persist
+- Copilot reasoning logs and live trace work dynamically
+- final response tags appear only after completion

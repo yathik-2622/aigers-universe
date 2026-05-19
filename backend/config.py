@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     WORKFLOW_INPUT_MAX_FILES: int = Field(default=6)
     WORKFLOW_INPUT_MAX_TOTAL_BYTES: int = Field(default=50 * 1024 * 1024)
     WORKFLOW_INPUT_MAX_TEXT_CHARS: int = Field(default=120000)
+    CHAT_INPUT_MAX_FILES: int = Field(default=10)
+    CHAT_INPUT_MAX_TOTAL_BYTES: int = Field(default=50 * 1024 * 1024)
+    CHAT_INPUT_MAX_TEXT_CHARS: int = Field(default=160000)
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

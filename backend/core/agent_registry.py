@@ -180,11 +180,11 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "type": "function",
         "function": {
             "name": "official_docs_search",
-            "description": "Search official docs providers such as Oracle Java, Python, Spring, and .NET.",
+            "description": "Search official docs providers such as Oracle Java, Python, Spring, .NET, React, Next.js, and Streamlit.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "provider": {"type": "string", "enum": ["java", "python", "spring", "dotnet"]},
+                    "provider": {"type": "string", "enum": ["java", "python", "spring", "dotnet", "react", "nextjs", "streamlit"]},
                     "query": {"type": "string"},
                     "max_results": {"type": "integer", "default": 5},
                 },
