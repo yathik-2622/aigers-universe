@@ -242,7 +242,7 @@ export default function WorkflowRunPage() {
                 <div className="text-[12px] text-muted">An agent triggered a HITL gate. Approve it, then resume if the previous process stopped.</div>
               </div>
             </div>
-            <Link to="/hitl" data-testid="goto-hitl-btn" className="px-3 py-1.5 rounded-md bg-warn text-bg text-sm font-medium hover:opacity-90">Go to HITL panel</Link>
+            <Link to={`/hitl?returnTo=${encodeURIComponent(`/runs/${runId}`)}`} data-testid="goto-hitl-btn" className="px-3 py-1.5 rounded-md bg-warn text-bg text-sm font-medium hover:opacity-90">Go to HITL panel</Link>
           </div>
         )}
 

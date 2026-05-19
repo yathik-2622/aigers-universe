@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Code2, Database, Download, FileText, Lightbulb, Search, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import CodeSnippet from '../components/common/CodeSnippet.jsx'
+import CustomSelect from '../components/common/CustomSelect.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
+import ModelBadge from '../components/common/ModelBadge.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
 import { getTemplateCode, installTemplate, listTemplates } from '../api/platform.js'
 
@@ -94,6 +96,7 @@ export default function MarketplacePage() {
               <p className="text-[13px] text-muted leading-relaxed mb-4 min-h-[42px]">{tpl.description}</p>
               <div className="flex items-center gap-1.5 flex-wrap mb-4">
                 <FrameworkBadge framework={tpl.framework} />
+                {tpl.default_model_name && <ModelBadge model={tpl.default_model_name} />}
                 {(tpl.tags || []).filter(tag => normalizedFramework(tag) !== normalizedFramework(tpl.framework)).slice(0, 3).map(tag => <span key={tag} className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-line text-muted bg-elev/50">{tag}</span>)}
                 {(tpl.suggested_tools || []).map(t => <span key={t} className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-line text-muted bg-elev/50">{t}</span>)}
                 {tpl.hitl_enabled && <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border border-warn/30 text-warn bg-warn/10">HITL</span>}
@@ -123,9 +126,13 @@ export default function MarketplacePage() {
         width="max-w-5xl"
         actions={(
           <>
-            <select value={preview.framework} onChange={(e) => changeFramework(e.target.value)} className="glass-select px-3 py-2 text-sm outline-none">
-              {EXPORT_FRAMEWORKS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <CustomSelect
+              label="Export framework"
+              value={preview.framework}
+              options={EXPORT_FRAMEWORKS}
+              onChange={changeFramework}
+              className="w-[220px]"
+            />
             <button onClick={downloadCode} className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white hover:opacity-90">
               <Download size={14} /> Download
             </button>

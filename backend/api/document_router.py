@@ -65,7 +65,7 @@ def _extract_xml_like_text(file_bytes: bytes) -> str:
 
 def _normalize_scope(scope: str) -> str:
     normalized = (scope or "knowledge_base").strip().lower()
-    return normalized if normalized in {"knowledge_base", "workflow_input"} else "knowledge_base"
+    return normalized if normalized in {"knowledge_base", "workflow_input", "chat_input"} else "knowledge_base"
 
 
 def _retention_expiry(days: int) -> str:
@@ -131,7 +131,7 @@ async def _store_document_text(
         "text_length": len(text),
         "chunk_count": len(chunks),
         "vector_ids": vector_ids,
-        "retention_expires_at": _retention_expiry(settings.WORKFLOW_INPUT_RETENTION_DAYS) if normalized_scope == "workflow_input" else None,
+        "retention_expires_at": _retention_expiry(settings.WORKFLOW_INPUT_RETENTION_DAYS) if normalized_scope in {"workflow_input", "chat_input"} else None,
         "uploaded_at": datetime.datetime.utcnow().isoformat(),
     })
     return {
@@ -151,7 +151,7 @@ async def cleanup_expired_workflow_inputs() -> int:
     now = datetime.datetime.utcnow().isoformat()
     result = await db.documents.delete_many(
         {
-            "scope": "workflow_input",
+            "scope": {"$in": ["workflow_input", "chat_input"]},
             "retention_expires_at": {"$ne": None, "$lte": now},
         }
     )

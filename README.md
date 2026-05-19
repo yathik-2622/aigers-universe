@@ -34,9 +34,12 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Project member sharing and shared workflow visibility by project.
 - Agent code export for LangGraph, LangChain, CrewAI, Agno, and Langflow-style JSON.
 - Framework-native runtime runners for LangGraph, LangChain, CrewAI, and Agno-style agents instead of one raw custom chat loop.
-- Tool Playground for chat-style interaction with MCP tools, inspired by Langflow's Playground/Projects concepts.
+- AIger Copilot for session-based chat interaction with MCP tools, installed agents, marketplace guidance, and platform-aware workflow recommendations.
 - Knowledge-base uploads now support categories, broader text/code/document formats, and GitHub repository import for modernization-style use cases.
-- MCP Studio now acts as the user-level surface for KB uploads, category-based knowledge organization, GitHub import, tool chat, and KB history.
+- AIger Copilot now replaces the old MCP Studio as a session-based chat workspace with history, mode guardrails, model/tool selection, chat-scoped file attachments, installed-agent awareness, and platform-grounded guidance.
+- AIger Copilot now includes collapsible history, inline rename/delete controls, backend-streamed responses, live reasoning logs, follow-up question suggestions, citations with popup previews, and a lighter chat-first UX.
+- Marketplace cards now surface template-specific recommended models instead of defaulting every template to the same model.
+- The landing page now uses a cleaner cyberpunk product layout with less crowding and more direct feature communication.
 - Workflow Builder now separates reusable KB context from run-scoped workflow inputs: text, uploaded files, and GitHub repo snapshots.
 - Agent nodes now support per-node workflow input bindings so the same installed agent can see different inputs in different workflows.
 - Official-doc tooling now includes Java, Python, Spring, and .NET adapters backed by live documentation search/fetch.
@@ -48,6 +51,7 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Planner review now supports `Accept`, `Edit`, `Replan`, and `Reject`, and accepted plans close the modal before slow-building the workflow onto the canvas.
 - Workflow Builder upload and import actions now have independent loading states so file uploads and GitHub imports only animate when that exact action is running.
 - Workflow Run now hides the global app header, expands the canvas, uses expandable A2A messages, and shows report-preparation states instead of surfacing premature report errors.
+- HITL approvals opened from a run now return operators to that exact run after approval so paused execution feels continuous.
 - Builder and run canvas now use guided node-focus transitions so the active step is visually centered during workflow construction and execution.
 - Agent export and workflow reports now preserve stronger code-snippet coloring and more eye-catching highlighted sections.
 - Workflow input retention, size limits, and startup cleanup are now configurable from env.
@@ -176,6 +180,9 @@ Required `.env` values:
 | `WORKFLOW_INPUT_MAX_FILES` | `6` | Max workflow input files attached to one run |
 | `WORKFLOW_INPUT_MAX_TOTAL_BYTES` | `52428800` | Max aggregate workflow input upload size per run |
 | `WORKFLOW_INPUT_MAX_TEXT_CHARS` | `120000` | Max text payload across workflow inputs per run |
+| `CHAT_INPUT_MAX_FILES` | `10` | Max files attached to one AIger Copilot chat session |
+| `CHAT_INPUT_MAX_TOTAL_BYTES` | `52428800` | Max aggregate file bytes attached to one chat session |
+| `CHAT_INPUT_MAX_TEXT_CHARS` | `160000` | Max extracted text retained from chat attachments |
 
 Recommended values for a local setup:
 - `GITHUB_TOKEN=` leave blank if you only import occasional public repos; add a fine-grained token for private repos or heavier usage.
@@ -186,6 +193,9 @@ Recommended values for a local setup:
 - `WORKFLOW_INPUT_MAX_FILES=6` is a good default for migration workflows.
 - `WORKFLOW_INPUT_MAX_TOTAL_BYTES=52428800` equals 50 MB total workflow uploads per run.
 - `WORKFLOW_INPUT_MAX_TEXT_CHARS=120000` keeps input payloads large enough for migration tasks without letting runs balloon uncontrollably.
+- `CHAT_INPUT_MAX_FILES=10` gives the copilot enough room for multi-document questions without turning one chat into a dumping ground.
+- `CHAT_INPUT_MAX_TOTAL_BYTES=52428800` keeps chat attachments aligned with the current workflow-input ceiling.
+- `CHAT_INPUT_MAX_TEXT_CHARS=160000` is a practical cap for platform-aware chat analysis.
 
 Run the backend:
 ```bash
@@ -407,7 +417,7 @@ VITE_REACT_APP_BACKEND_URL=http://localhost:8001
    `Review this vendor contract for extraction, risk, compliance, and final approval recommendation.`
 13. Click `Auto-build workflow` again and confirm a contract/risk pipeline is assembled.
 14. Upload a contract PDF or DOCX in KB or workflow inputs, run the workflow, and verify the run completes or pauses for HITL if the compliance checker triggers.
-15. Test official docs tools from MCP Studio:
+15. Test official docs tools from AIger Copilot:
    `java_docs_search` with "ExecutorService shutdown"
    `spring_docs_search` with "externalized configuration"
    `python_docs_search` with "asyncio task groups"

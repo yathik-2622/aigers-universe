@@ -36,7 +36,7 @@ A generic, domain-agnostic platform that lets you:
 12. [Troubleshooting](#troubleshooting)
 13. [Glossary](#glossary)
 14. [JWT Auth, Projects, And Admin View](#jwt-auth-projects-and-admin-view)
-15. [Tool Playground And Policy Uploads](#tool-playground-and-policy-uploads)
+15. [AIger Copilot And Policy Uploads](#aiger-copilot-and-policy-uploads)
 
 ---
 
@@ -205,7 +205,7 @@ Each pending card shows:
 - Note field (required to reject)
 - **Approve** (green) and **Reject** (red) buttons
 
-Approve → workflow resumes from where it paused.
+Approve → workflow resumes from where it paused. If you came from a run page, the app now routes you back to that same run after approval.
 Reject → workflow is marked `failed` with your reason logged.
 
 A **History** table below shows all resolved approvals with outcome + reviewer note + timestamp.
@@ -230,12 +230,23 @@ Click **Observability** in the sidebar.
 ### Sidebar
 - Collapsible (toggle at bottom). Width: `64` → `68px`. Preference saved in `localStorage`.
 - Logo: transparent stacked `Hexagon` (lucide-react), no solid background.
-- Pages: Dashboard · Marketplace · Agents · Workflow Builder · HITL Approvals · Observability.
+- Pages: Dashboard · Marketplace · Agents · Workflow Builder · AIger Copilot · HITL Approvals · Observability.
 
 ### Header
 - Auto-derives title/subtitle from the route.
 - On `/runs/:runId` it dynamically reads the workflow name + run id + status from the run page (via `TitleContext`).
 - Right side: `gpt-4o · gateway` model pill + `live` indicator.
+
+### AIger Copilot
+- Session-based workspace chat with persistent history and delete/reopen management.
+- Inline rename and delete controls are available directly from chat history.
+- Two guarded modes:
+  - `AIger Copilot` for answers grounded in this exact platform, its docs, installed agents, marketplace templates, MCP tools, workflows, A2A, KB, HITL, and operating patterns.
+  - `General Reasoning` for broader coding, architecture, debugging, and planning help.
+- Mode, model, and preferred-tool controls now live inside the composer area instead of a side panel.
+- Chat attachments are session-scoped and support up to the configured limit.
+- Assistant replies now stream live from the backend and can show backend-generated processing logs, source citations, and follow-up questions.
+- The copilot can recommend which agents to install, which MCP tools to use, what workflow order to build, and what inputs belong in workflow uploads versus reusable KB.
 
 ### Dashboard
 - Hero with CTAs to Marketplace and Builder.
@@ -471,16 +482,19 @@ Click the run id to jump back into the live run page.
 - Dashboard and Builder now let users open uploaded documents in a rich preview modal so extracted content can be reviewed without leaving the platform.
 - Knowledge-base ingestion now supports category-tagged uploads and GitHub repository import for repo-context and modernization workflows.
 
-## Tool Playground And Policy Uploads
+## AIger Copilot And Policy Uploads
 
-- `/tools-chat` is the dedicated MCP Studio for KB uploads, category-based knowledge history, GitHub import, tool testing, and operator prompts.
-- You can let the backend auto-select a tool or force a specific safe tool such as `policy_library_search`, `rules_engine_check`, `risk_scorer`, `serpapi_search`, or `webpage_fetch`.
-- KB uploads belong in MCP Studio or the KB section of the builder. Workflow Inputs are separate and are meant for run-specific payloads.
+- `/tools-chat` is the dedicated **AIger Copilot** workspace.
+- Use `AIger Copilot` mode when you want the answer grounded in this product: platform docs, installed agents, marketplace templates, workflows, A2A, HITL, reports, and what to do inside this exact deployment.
+- Use `General Reasoning` mode when you want broader coding, architecture, debugging, or planning help.
+- You can let the backend auto-select a tool or force a specific safe MCP tool such as `policy_library_search`, `rules_engine_check`, `risk_scorer`, `serpapi_search`, or `webpage_fetch`.
+- Chat attachments are session-scoped and separate from both KB uploads and workflow inputs.
+- KB uploads belong in the Builder KB area or document APIs. Workflow Inputs are run-scoped. Chat attachments are conversational context only.
 - If an agent should use policy or repo context directly, enable `knowledge_base_search`, `policy_library_search`, `webpage_fetch`, or `serpapi_search` on that agent from Agents or the node config panel.
 - Each tool card now explains when to use the tool, what input to provide, what output to expect, and offers example prompts for operators.
 - The Agents page can export each registered agent as LangGraph, LangChain, CrewAI, Agno, or Langflow-style code/JSON for review and download.
-- The chat pane in Tool Playground stays fixed while the tool guide column scrolls, and the chat composer can upload documents for search-oriented tool workflows.
-- Tool Playground also tracks user-level KB upload history and can import public GitHub repositories into the searchable knowledge base. Public repos work without `GITHUB_TOKEN`; private repos and higher rate limits need it.
+- The chat pane keeps persistent session history while the bottom composer exposes mode, model, MCP tool preference, file attachment, and send controls.
+- Public GitHub imports still work without `GITHUB_TOKEN` for KB and workflow-input flows. Private repos and higher rate limits still need it.
 
 ## Environment Guidance
 
@@ -568,7 +582,7 @@ Click the run id to jump back into the live run page.
    If a node is remote-routed, confirm it still completes and the tool list shows remote dispatch behavior in traces.
 
 9. Test official docs tools.
-   In MCP Studio, run:
+   In AIger Copilot, run:
    `java_docs_search` with `ExecutorService shutdown`
    `spring_docs_search` with `configuration properties`
    `python_docs_search` with `asyncio task groups`

@@ -22,7 +22,7 @@ export default function Sidebar() {
       { to: '/marketplace', label: 'Marketplace', icon: Store, id: 'marketplace' },
       { to: '/agents', label: 'Agents', icon: Cpu, id: 'agents' },
       { to: '/builder', label: 'Workflow Builder', icon: Workflow, id: 'builder' },
-      { to: '/tools-chat', label: 'MCP Studio', icon: Wrench, id: 'tools-chat' },
+      { to: '/tools-chat', label: 'AIger Copilot', icon: Wrench, id: 'tools-chat' },
       { to: '/hitl', label: 'HITL Approvals', icon: ShieldCheck, id: 'hitl' },
       { to: '/observability', label: 'Observability', icon: Activity, id: 'observability' },
     ]
@@ -68,10 +68,7 @@ export default function Sidebar() {
 
       {!collapsed && (
         <div className="m-3 p-3 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] text-[11px] text-muted leading-relaxed shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-ok" />
-            <span className="text-ink font-medium">Gateway online</span>
-          </div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-muted mb-1.5">{user?.role === 'admin' ? 'Control access' : 'Workspace access'}</div>
           <div className="text-ink font-medium truncate">{user?.display_name || 'Workspace user'}</div>
           <div className="truncate">{user?.email || ''}</div>
           <button onClick={logout} className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-panel/70 px-3 py-2 text-[12px] text-muted hover:text-ink">
@@ -79,7 +76,7 @@ export default function Sidebar() {
           </button>
         </div>
       )}
-      {collapsed && <div className="mb-3 flex justify-center" title="Gateway online"><span className="w-2 h-2 rounded-full bg-ok animate-pulse" /></div>}
+      {collapsed && <div className="mb-3 flex justify-center" title="Workspace access"><span className="w-2 h-2 rounded-full bg-accent animate-pulse" /></div>}
     </aside>
   )
 }

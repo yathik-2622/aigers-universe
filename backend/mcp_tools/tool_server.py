@@ -29,6 +29,9 @@ OFFICIAL_DOCS_PROVIDERS = {
     "python": {"label": "Python", "domains": ["docs.python.org"]},
     "spring": {"label": "Spring", "domains": ["docs.spring.io", "spring.io"]},
     "dotnet": {"label": ".NET", "domains": ["learn.microsoft.com"]},
+    "react": {"label": "React", "domains": ["react.dev", "legacy.reactjs.org"]},
+    "nextjs": {"label": "Next.js", "domains": ["nextjs.org"]},
+    "streamlit": {"label": "Streamlit", "domains": ["docs.streamlit.io", "streamlit.io"]},
 }
 
 

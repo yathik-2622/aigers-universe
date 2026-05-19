@@ -3,6 +3,7 @@ import { Save, ShieldCheck, Wrench, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { listModels, listTools, updateAgent } from '../../api/platform.js'
 import { validateRemoteCard } from '../../api/a2a.js'
+import CustomSelect from '../common/CustomSelect.jsx'
 
 export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) {
   const [tools, setTools] = useState([])
@@ -120,9 +121,12 @@ export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) 
         </div>
         <div>
           <label className="block text-[11px] uppercase tracking-widest text-muted mb-1.5">Model</label>
-          <select value={form.model_name} onChange={(e) => setForm(f => ({ ...f, model_name: e.target.value }))} className="w-full bg-elev border border-line rounded-md px-3 py-2 text-sm focus:border-accent outline-none">
-            {models.map(model => <option key={model} value={model}>{model}</option>)}
-          </select>
+          <CustomSelect
+            label="Model"
+            value={form.model_name}
+            onChange={(value) => setForm((f) => ({ ...f, model_name: value }))}
+            options={models}
+          />
         </div>
         <div>
           <label className="block text-[11px] uppercase tracking-widest text-muted mb-1.5">System Prompt</label>
@@ -148,10 +152,15 @@ export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) 
                 <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${form.a2a_enabled ? 'translate-x-5' : ''}`} />
               </button>
             </div>
-            <select value={form.a2a_mode} onChange={(e) => setForm(f => ({ ...f, a2a_mode: e.target.value }))} className="w-full bg-elev border border-line rounded-md px-3 py-2 text-sm focus:border-accent outline-none">
-              <option value="local">Local agent execution</option>
-              <option value="remote">Remote A2A agent route</option>
-            </select>
+            <CustomSelect
+              label="A2A mode"
+              value={form.a2a_mode}
+              onChange={(value) => setForm((f) => ({ ...f, a2a_mode: value }))}
+              options={[
+                { value: 'local', label: 'Local agent execution' },
+                { value: 'remote', label: 'Remote A2A agent route' },
+              ]}
+            />
             {form.a2a_mode === 'remote' && (
               <div className="space-y-2">
                 <div className="flex gap-2">
