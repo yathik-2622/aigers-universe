@@ -621,13 +621,16 @@ async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequ
             blocking_frameworks.append({"agent_id": agent.get("agent_id"), "name": agent.get("name"), "framework": framework, "error": state.get("error")})
         required_tools.update(agent.get("tools", []) or [])
     blocking_tools = []
+    warning_tools = []
     for tool_name in sorted(required_tools):
         if tool_name not in TOOL_REGISTRY:
             blocking_tools.append({"name": tool_name, "error": "Tool not registered"})
             continue
         health = await get_tool_health(tool_name)
-        if health.get("status") == "unhealthy":
+        if health.get("status") == "unhealthy" and health.get("blocking", False):
             blocking_tools.append(health)
+        elif health.get("status") in {"unhealthy", "degraded"}:
+            warning_tools.append(health)
     if blocking_frameworks or blocking_tools:
         raise HTTPException(
             status_code=409,
@@ -635,11 +638,12 @@ async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequ
                 "message": "Workflow preflight failed",
                 "framework_issues": blocking_frameworks,
                 "tool_issues": blocking_tools,
+                "warnings": warning_tools,
             },
         )
     try:
         run_id = await build_and_run_workflow(workflow_id=workflow_id, input_data=body.input_data, owner_user_id=user_id)
-        return {"run_id": run_id, "status": "running"}
+        return {"run_id": run_id, "status": "running", "warnings": warning_tools}
     except Exception as exc:
         logger.error("api.workflow.run_failed", workflow_id=workflow_id, error=str(exc), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to start workflow: {exc}")

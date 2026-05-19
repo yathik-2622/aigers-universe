@@ -56,38 +56,39 @@ async def _check_http_json(url: str, params: dict | None = None, headers: dict |
 
 async def get_tool_health(tool_name: str) -> dict:
     if tool_name not in TOOL_REGISTRY:
-        return {"name": tool_name, "status": "unhealthy", "error": "Tool not registered"}
+        return {"name": tool_name, "status": "unhealthy", "error": "Tool not registered", "blocking": True}
 
     if tool_name in {"semantic_search", "knowledge_base_search", "document_store", "rules_engine_check", "policy_library_search", "risk_scorer", "trigger_hitl"}:
         result = await _check_db_health()
-        return {"name": tool_name, **result, "kind": "db_backed"}
+        return {"name": tool_name, **result, "kind": "db_backed", "blocking": True}
 
     if tool_name == "wikipedia_search":
-        result = await _check_http_json(
-            "https://en.wikipedia.org/w/api.php",
-            params={"action": "query", "list": "search", "srsearch": "spring boot", "srlimit": 1, "format": "json", "formatversion": 2, "origin": "*"},
-            headers={"User-Agent": "AIGERS-Universe/1.0 (tool-health)"},
-        )
-        return {"name": tool_name, **result, "kind": "web_probe"}
+        try:
+            payload = await wikipedia_search_impl("spring boot", limit=1)
+            return {"name": tool_name, "status": "healthy", "kind": "web_probe", "count": payload.get("count", 0), "blocking": False}
+        except Exception as exc:
+            return {"name": tool_name, "status": "degraded", "error": str(exc), "kind": "web_probe", "blocking": False}
 
     if tool_name == "webpage_fetch":
         result = await _check_http_json("https://example.com")
-        return {"name": tool_name, **result, "kind": "web_probe"}
+        status = result.get("status", "unhealthy")
+        return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "web_probe", "blocking": False}
 
     if tool_name == "weather_current":
         result = await _check_http_json(
             "https://api.open-meteo.com/v1/forecast",
             params={"latitude": 12.97, "longitude": 77.59, "current": "temperature_2m", "timezone": "auto"},
         )
-        return {"name": tool_name, **result, "kind": "free_api_probe"}
+        status = result.get("status", "unhealthy")
+        return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "free_api_probe", "blocking": False}
 
     if tool_name == "openweather_current":
         configured = bool(settings.OPENWEATHER_API_KEY.strip())
-        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured}
+        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
 
     if tool_name == "serpapi_search":
         configured = bool(settings.SERPAPI_KEY.strip())
-        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured}
+        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
 
     if tool_name in {"official_docs_search", "java_docs_search", "python_docs_search", "spring_docs_search", "dotnet_docs_search"}:
         provider = {
@@ -100,14 +101,14 @@ async def get_tool_health(tool_name: str) -> dict:
         try:
             payload = await official_docs_search_impl(provider=provider, query="collections", max_results=1, fetch_excerpts=False)
             healthy = not payload.get("error")
-            return {"name": tool_name, "status": "healthy" if healthy else "unhealthy", "kind": "docs_probe", "count": payload.get("count", 0), "error": payload.get("error")}
+            return {"name": tool_name, "status": "healthy" if healthy else "degraded", "kind": "docs_probe", "count": payload.get("count", 0), "error": payload.get("error"), "blocking": False}
         except Exception as exc:
-            return {"name": tool_name, "status": "unhealthy", "kind": "docs_probe", "error": str(exc)}
+            return {"name": tool_name, "status": "degraded", "kind": "docs_probe", "error": str(exc), "blocking": False}
 
     if tool_name in {"remote_agent_discover", "remote_agent_dispatch"}:
-        return {"name": tool_name, "status": "degraded", "kind": "runtime_dependent", "checked_live": False, "note": "Requires a runtime remote agent card URL to probe"}
+        return {"name": tool_name, "status": "degraded", "kind": "runtime_dependent", "checked_live": False, "note": "Requires a runtime remote agent card URL to probe", "blocking": False}
 
-    return {"name": tool_name, "status": "healthy", "kind": "static"}
+    return {"name": tool_name, "status": "healthy", "kind": "static", "blocking": False}
 
 
 async def get_all_tool_health() -> dict:
