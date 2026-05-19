@@ -16,8 +16,10 @@ from core.report_builder import build_run_report
 from db.mongo_client import get_db
 from core.request_context import get_optional_role, get_optional_user_id
 from core.workflow_engine import build_and_run_workflow, request_workflow_pause, request_workflow_stop, resume_workflow_run
+from core.framework_runners import get_framework_runtime_health
 from a2a.agent_communication import get_a2a_messages
 from db.repositories.agent_repo import AgentRepository
+from mcp_tools.tool_server import TOOL_REGISTRY, get_tool_health
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -586,6 +588,20 @@ async def get_workflow(workflow_id: str, request: Request):
     return wf
 
 
+@router.delete("/{workflow_id}")
+async def delete_workflow(workflow_id: str, request: Request):
+    db = get_db()
+    wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0, "workflow_id": 1, "owner_user_id": 1})
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
+    role = get_optional_role(request)
+    user_id = get_optional_user_id(request)
+    if role != "admin" and wf.get("owner_user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Only the workflow owner or an admin can delete this workflow")
+    await db.workflow_definitions.delete_one({"workflow_id": workflow_id})
+    return {"success": True, "workflow_id": workflow_id}
+
+
 @router.post("/{workflow_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequest):
     db = get_db()
@@ -594,9 +610,40 @@ async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequ
     wf = await db.workflow_definitions.find_one(query)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
+    stored_agents = await db.agents.find({"agent_id": {"$in": wf.get("agents", [])}, "status": "active"}, {"_id": 0}).to_list(500)
+    framework_health = get_framework_runtime_health()
+    blocking_frameworks = []
+    required_tools = set()
+    for agent in stored_agents:
+        framework = (agent.get("framework") or "langgraph").lower()
+        state = framework_health.get(framework, {})
+        if state.get("status") == "unhealthy" and not state.get("fallback_available"):
+            blocking_frameworks.append({"agent_id": agent.get("agent_id"), "name": agent.get("name"), "framework": framework, "error": state.get("error")})
+        required_tools.update(agent.get("tools", []) or [])
+    blocking_tools = []
+    warning_tools = []
+    for tool_name in sorted(required_tools):
+        if tool_name not in TOOL_REGISTRY:
+            blocking_tools.append({"name": tool_name, "error": "Tool not registered"})
+            continue
+        health = await get_tool_health(tool_name)
+        if health.get("status") == "unhealthy" and health.get("blocking", False):
+            blocking_tools.append(health)
+        elif health.get("status") in {"unhealthy", "degraded"}:
+            warning_tools.append(health)
+    if blocking_frameworks or blocking_tools:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Workflow preflight failed",
+                "framework_issues": blocking_frameworks,
+                "tool_issues": blocking_tools,
+                "warnings": warning_tools,
+            },
+        )
     try:
         run_id = await build_and_run_workflow(workflow_id=workflow_id, input_data=body.input_data, owner_user_id=user_id)
-        return {"run_id": run_id, "status": "running"}
+        return {"run_id": run_id, "status": "running", "warnings": warning_tools}
     except Exception as exc:
         logger.error("api.workflow.run_failed", workflow_id=workflow_id, error=str(exc), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to start workflow: {exc}")
@@ -621,6 +668,23 @@ async def get_run_status(run_id: str, request: Request):
     run["a2a_messages"] = await get_a2a_messages(workflow_run_id=run_id)
     run = await _attach_run_timing(db, run)
     return run
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str, request: Request):
+    db = get_db()
+    run = await db.workflow_runs.find_one({"run_id": run_id}, {"_id": 0, "run_id": 1, "owner_user_id": 1})
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    role = get_optional_role(request)
+    user_id = get_optional_user_id(request)
+    if role != "admin" and run.get("owner_user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Only the workflow run owner or an admin can delete this run")
+    await db.workflow_runs.delete_one({"run_id": run_id})
+    await db.agent_traces.delete_many({"workflow_run_id": run_id})
+    await db.a2a_messages.delete_many({"workflow_run_id": run_id})
+    await db.hitl_records.delete_many({"workflow_run_id": run_id})
+    return {"success": True, "run_id": run_id}
 
 
 @router.get("/runs/{run_id}/report")

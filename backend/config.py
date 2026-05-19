@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     A2A_SHARED_SECRET: str = Field(default="")
     A2A_PUBLIC_BASE_URL: str = Field(default="")
     OFFICIAL_DOCS_MAX_RESULTS: int = Field(default=5)
+    OFFICIAL_DOCS_FETCH_EXCERPTS: bool = Field(default=False)
+    OFFICIAL_DOCS_SEARCH_TIMEOUT_SECONDS: int = Field(default=12)
+    OFFICIAL_DOCS_EXCERPT_TIMEOUT_SECONDS: int = Field(default=8)
+    WEBPAGE_FETCH_TIMEOUT_SECONDS: int = Field(default=10)
+    AGENT_STEP_TIMEOUT_SECONDS: int = Field(default=300)
 
     # FAISS vector store
     FAISS_INDEX_PATH: str = Field(default=str(BASE_DIR / "vectorstore" / "data" / "faiss_index"))

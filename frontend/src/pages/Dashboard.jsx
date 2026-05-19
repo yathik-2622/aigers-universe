@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, ArrowUpRight, Cpu, Eye, FlaskConical, ShieldCheck, Workflow, Zap } from 'lucide-react'
+import { Activity, ArrowUpRight, Cpu, Eye, FlaskConical, ShieldCheck, Trash2, Workflow, Zap } from 'lucide-react'
+import { toast } from 'sonner'
 import { getMetrics } from '../api/observability.js'
-import { listWorkflows, listAllRuns } from '../api/workflows.js'
+import { deleteRun, listWorkflows, listAllRuns } from '../api/workflows.js'
 import { listAgents } from '../api/platform.js'
 import { getPending } from '../api/hitl.js'
 import { listDocuments } from '../api/documents.js'
 import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
 import StatusBadge from '../components/common/StatusBadge.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 function Stat({ label, value, icon: Icon, accent }) {
   return (
@@ -24,6 +26,7 @@ function Stat({ label, value, icon: Icon, accent }) {
 }
 
 export default function Dashboard() {
+  const { user } = useAuth()
   const [metrics, setMetrics] = useState(null)
   const [agents, setAgents] = useState([])
   const [workflows, setWorkflows] = useState([])
@@ -50,6 +53,17 @@ export default function Dashboard() {
     const t = setInterval(load, 6000)
     return () => clearInterval(t)
   }, [])
+
+  const handleDeleteRun = async (runId) => {
+    if (!window.confirm('Delete this run history item? This removes its traces/messages too.')) return
+    try {
+      await deleteRun(runId)
+      setRuns((prev) => prev.filter((item) => item.run_id !== runId))
+      toast.success('Run deleted')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete run')
+    }
+  }
 
   return (
     <div data-testid="dashboard-page" className="p-8 max-w-[1440px]">
@@ -98,14 +112,26 @@ export default function Dashboard() {
               </div>
             )}
             {runs.slice(0, 8).map((r) => (
-              <Link key={r.run_id} to={`/runs/${r.run_id}`} data-testid={`run-row-${r.run_id}`} className="flex items-center justify-between gap-3 px-3 py-3 rounded-2xl border border-white/10 bg-white/5 hover:border-accent/30">
+              <div key={r.run_id} className="flex items-center justify-between gap-3 px-3 py-3 rounded-2xl border border-white/10 bg-white/5 hover:border-accent/30">
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">{r.workflow_name || r.workflow_id}</div>
-                  <div className="text-[11px] font-mono text-muted truncate">{r.run_id}</div>
+                  <Link to={`/runs/${r.run_id}`} data-testid={`run-row-${r.run_id}`} className="block">
+                    <div className="text-sm font-medium truncate">{r.workflow_name || r.workflow_id}</div>
+                    <div className="text-[11px] font-mono text-muted truncate">{r.run_id}</div>
+                  </Link>
                 </div>
                 <div className="text-[11px] text-muted hidden md:block">{(r.started_at || '').slice(0, 16).replace('T', ' ')}</div>
                 <StatusBadge status={r.status} />
-              </Link>
+                {(user?.role === 'admin' || user?.user_id === r.owner_user_id) && (
+                  <button
+                    onClick={() => handleDeleteRun(r.run_id)}
+                    className="inline-flex items-center justify-center rounded-full border border-[#ef476f]/30 bg-[#ef476f]/10 p-2 text-[#ef476f] hover:bg-[#ef476f]/15"
+                    title="Delete run"
+                    aria-label="Delete run"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>

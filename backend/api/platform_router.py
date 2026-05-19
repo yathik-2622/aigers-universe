@@ -10,7 +10,9 @@ from core.agent_code_export import export_agent_code
 from core.request_context import get_optional_user_id
 from db.repositories.agent_repo import AgentRepository
 from core.agent_registry import invoke_agent_by_id
+from core.framework_runners import get_framework_runtime_health
 from db.mongo_client import get_db
+from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY, get_all_tool_health
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -143,14 +145,61 @@ async def invoke_agent(agent_id: str, request: Request, body: InvokeAgentRequest
 @router.get("/tools")
 async def list_available_tools():
     """List all MCP tool names available on the platform."""
-    from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
     tools = [{"name": name, **TOOL_METADATA.get(name, {})} for name in TOOL_REGISTRY.keys()]
     return {"tools": [tool["name"] for tool in tools], "items": tools}
+
+
+@router.get("/tools/health")
+async def tool_health():
+    return await get_all_tool_health()
+
+
+@router.get("/frameworks/health")
+async def framework_health():
+    return {"frameworks": get_framework_runtime_health()}
 
 
 @router.get("/models")
 async def list_available_models():
     return {"models": AVAILABLE_MODELS, "default": "gpt-4o"}
+
+
+@router.get("/marketplace/smoke-test")
+async def marketplace_smoke_test():
+    db = get_db()
+    templates = await db.marketplace_templates.find({}, {"_id": 0}).to_list(1000)
+    frameworks = get_framework_runtime_health()
+    tool_health = await get_all_tool_health()
+    tool_health_by_name = {item["name"]: item for item in tool_health["items"]}
+    items = []
+    blocking = []
+
+    for template in templates:
+        framework = (template.get("framework") or "langgraph").lower()
+        template_tools = template.get("suggested_tools", []) or []
+        missing_tools = [tool for tool in template_tools if tool not in TOOL_REGISTRY]
+        unhealthy_tools = [tool for tool in template_tools if tool_health_by_name.get(tool, {}).get("status") == "unhealthy"]
+        framework_health = frameworks.get(framework, {"status": "unhealthy", "native_available": False, "fallback_available": False, "error": "Unknown framework"})
+        template_status = "healthy"
+        if missing_tools or (framework_health.get("status") == "unhealthy" and not framework_health.get("fallback_available")):
+            template_status = "unhealthy"
+        elif unhealthy_tools or framework_health.get("status") == "degraded":
+            template_status = "degraded"
+        item = {
+            "template_id": template.get("template_id"),
+            "name": template.get("name"),
+            "framework": framework,
+            "status": template_status,
+            "framework_health": framework_health,
+            "missing_tools": missing_tools,
+            "unhealthy_tools": unhealthy_tools,
+            "tools": template_tools,
+        }
+        items.append(item)
+        if template_status == "unhealthy":
+            blocking.append(template.get("template_id"))
+
+    return {"count": len(items), "blocking_templates": blocking, "items": items, "frameworks": frameworks, "tool_health": tool_health}
 
 
 @router.get("/agents/{agent_id}/code")

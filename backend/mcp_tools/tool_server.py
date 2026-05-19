@@ -35,6 +35,91 @@ OFFICIAL_DOCS_PROVIDERS = {
 }
 
 
+async def _check_db_health() -> dict:
+    try:
+        db = get_db()
+        await db.command("ping")
+        return {"status": "healthy"}
+    except Exception as exc:
+        return {"status": "unhealthy", "error": str(exc)}
+
+
+async def _check_http_json(url: str, params: dict | None = None, headers: dict | None = None, timeout: float = 8.0) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return {"status": "healthy", "status_code": response.status_code}
+    except Exception as exc:
+        return {"status": "unhealthy", "error": str(exc)}
+
+
+async def get_tool_health(tool_name: str) -> dict:
+    if tool_name not in TOOL_REGISTRY:
+        return {"name": tool_name, "status": "unhealthy", "error": "Tool not registered", "blocking": True}
+
+    if tool_name in {"semantic_search", "knowledge_base_search", "document_store", "rules_engine_check", "policy_library_search", "risk_scorer", "trigger_hitl"}:
+        result = await _check_db_health()
+        return {"name": tool_name, **result, "kind": "db_backed", "blocking": True}
+
+    if tool_name == "wikipedia_search":
+        try:
+            payload = await wikipedia_search_impl("spring boot", limit=1)
+            return {"name": tool_name, "status": "healthy", "kind": "web_probe", "count": payload.get("count", 0), "blocking": False}
+        except Exception as exc:
+            return {"name": tool_name, "status": "degraded", "error": str(exc), "kind": "web_probe", "blocking": False}
+
+    if tool_name == "webpage_fetch":
+        result = await _check_http_json("https://example.com")
+        status = result.get("status", "unhealthy")
+        return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "web_probe", "blocking": False}
+
+    if tool_name == "weather_current":
+        result = await _check_http_json(
+            "https://api.open-meteo.com/v1/forecast",
+            params={"latitude": 12.97, "longitude": 77.59, "current": "temperature_2m", "timezone": "auto"},
+        )
+        status = result.get("status", "unhealthy")
+        return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "free_api_probe", "blocking": False}
+
+    if tool_name == "openweather_current":
+        configured = bool(settings.OPENWEATHER_API_KEY.strip())
+        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
+
+    if tool_name == "serpapi_search":
+        configured = bool(settings.SERPAPI_KEY.strip())
+        return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
+
+    if tool_name in {"official_docs_search", "java_docs_search", "python_docs_search", "spring_docs_search", "dotnet_docs_search"}:
+        provider = {
+            "official_docs_search": "java",
+            "java_docs_search": "java",
+            "python_docs_search": "python",
+            "spring_docs_search": "spring",
+            "dotnet_docs_search": "dotnet",
+        }[tool_name]
+        try:
+            payload = await official_docs_search_impl(provider=provider, query="collections", max_results=1, fetch_excerpts=False)
+            healthy = not payload.get("error")
+            return {"name": tool_name, "status": "healthy" if healthy else "degraded", "kind": "docs_probe", "count": payload.get("count", 0), "error": payload.get("error"), "blocking": False}
+        except Exception as exc:
+            return {"name": tool_name, "status": "degraded", "kind": "docs_probe", "error": str(exc), "blocking": False}
+
+    if tool_name in {"remote_agent_discover", "remote_agent_dispatch"}:
+        return {"name": tool_name, "status": "degraded", "kind": "runtime_dependent", "checked_live": False, "note": "Requires a runtime remote agent card URL to probe", "blocking": False}
+
+    return {"name": tool_name, "status": "healthy", "kind": "static", "blocking": False}
+
+
+async def get_all_tool_health() -> dict:
+    items = []
+    for name in TOOL_REGISTRY.keys():
+        items.append(await get_tool_health(name))
+    unhealthy = [item["name"] for item in items if item.get("status") == "unhealthy"]
+    degraded = [item["name"] for item in items if item.get("status") == "degraded"]
+    return {"items": items, "unhealthy": unhealthy, "degraded": degraded}
+
+
 def register_all_tools() -> None:
     """Log all registered MCP tools at startup."""
     try:
@@ -182,30 +267,64 @@ async def risk_scorer_impl(text: str, context: str = "") -> dict:
 
 async def wikipedia_search_impl(query: str, limit: int = 5) -> dict:
     """Search Wikipedia for official-ish encyclopedia context."""
+    safe_limit = max(1, min(limit, 10))
+    headers = {
+        "User-Agent": "AIGERS-Universe/1.0 (agent-research; contact=admin@aigers.local)",
+        "Accept": "application/json",
+    }
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        response = await client.get(
-            "https://en.wikipedia.org/w/api.php",
-            params={
-                "action": "opensearch",
-                "search": query,
-                "limit": max(1, min(limit, 10)),
-                "namespace": 0,
-                "format": "json",
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    titles = payload[1] if len(payload) > 1 else []
-    descriptions = payload[2] if len(payload) > 2 else []
-    links = payload[3] if len(payload) > 3 else []
-    results = []
-    for idx, title in enumerate(titles):
-        results.append({
-            "title": title,
-            "description": descriptions[idx] if idx < len(descriptions) else "",
-            "url": links[idx] if idx < len(links) else "",
-        })
-    return {"results": results, "count": len(results)}
+        try:
+            response = await client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "srlimit": safe_limit,
+                    "format": "json",
+                    "formatversion": 2,
+                    "origin": "*",
+                },
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            entries = (payload.get("query") or {}).get("search") or []
+            results = [{
+                "title": item.get("title", ""),
+                "description": re.sub(r"<[^>]+>", "", item.get("snippet", "")),
+                "url": f"https://en.wikipedia.org/wiki/{(item.get('title') or '').replace(' ', '_')}",
+            } for item in entries]
+            return {"results": results, "count": len(results)}
+        except Exception as exc:
+            logger.warning("tool.wikipedia.primary_failed", query=query, error=str(exc))
+            fallback = await client.get(
+                "https://en.wikipedia.org/w/index.php",
+                params={"search": query, "title": "Special:Search", "fulltext": 1},
+                headers=headers,
+            )
+            fallback.raise_for_status()
+            html = fallback.text
+            matches = re.findall(
+                r'<a[^>]*href="(/wiki/[^"#?]+)"[^>]*>(.*?)</a>',
+                html,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            seen = set()
+            results = []
+            for href, raw_title in matches:
+                title = re.sub(r"<[^>]+>", "", raw_title).strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                results.append({
+                    "title": title,
+                    "description": "",
+                    "url": f"https://en.wikipedia.org{href}",
+                })
+                if len(results) >= safe_limit:
+                    break
+            return {"results": results, "count": len(results)}
 
 
 async def weather_current_impl(latitude: float, longitude: float, timezone: str = "auto") -> dict:
@@ -279,7 +398,7 @@ async def serpapi_search_impl(query: str, num: int = 5, location: str | None = N
 
 async def webpage_fetch_impl(url: str, max_chars: int = 5000) -> dict:
     """Fetch a web page and return a cleaned text excerpt."""
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=float(settings.WEBPAGE_FETCH_TIMEOUT_SECONDS), follow_redirects=True) as client:
         response = await client.get(url, headers={"User-Agent": "AIGERS-Universe/1.0"})
         response.raise_for_status()
         html = response.text
@@ -294,19 +413,31 @@ def _decode_duckduckgo_href(href: str) -> str:
     return unquote(match.group(1)) if match else href
 
 
-async def official_docs_search_impl(provider: str, query: str, max_results: int = 5, fetch_excerpts: bool = True) -> dict:
+async def official_docs_search_impl(provider: str, query: str, max_results: int = 5, fetch_excerpts: bool | None = None) -> dict:
     provider_key = (provider or "").strip().lower()
     if provider_key not in OFFICIAL_DOCS_PROVIDERS:
         raise ValueError(f"Unsupported provider '{provider}'. Must be one of {sorted(OFFICIAL_DOCS_PROVIDERS)}")
     config = OFFICIAL_DOCS_PROVIDERS[provider_key]
     max_results = max(1, min(max_results, settings.OFFICIAL_DOCS_MAX_RESULTS))
+    fetch_excerpts = settings.OFFICIAL_DOCS_FETCH_EXCERPTS if fetch_excerpts is None else fetch_excerpts
     search_query = " OR ".join([f"site:{domain}" for domain in config["domains"]]) + f" {query}"
     search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(search_query)}"
 
-    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
-        response = await client.get(search_url, headers={"User-Agent": "AIGERS-Universe/1.0"})
-        response.raise_for_status()
-        html = response.text
+    try:
+        async with httpx.AsyncClient(timeout=float(settings.OFFICIAL_DOCS_SEARCH_TIMEOUT_SECONDS), follow_redirects=True) as client:
+            response = await client.get(search_url, headers={"User-Agent": "AIGERS-Universe/1.0"})
+            response.raise_for_status()
+            html = response.text
+    except Exception as exc:
+        logger.warning("tool.official_docs_search_failed", provider=provider_key, query=query, error=str(exc))
+        return {
+            "provider": provider_key,
+            "provider_label": config["label"],
+            "query": query,
+            "results": [],
+            "count": 0,
+            "error": str(exc),
+        }
 
     matches = re.findall(
         r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
@@ -329,8 +460,14 @@ async def official_docs_search_impl(provider: str, query: str, max_results: int 
         }
         if fetch_excerpts:
             try:
-                fetched = await webpage_fetch_impl(url=url, max_chars=1800)
-                item["excerpt"] = fetched.get("content", "")
+                async with httpx.AsyncClient(timeout=float(settings.OFFICIAL_DOCS_EXCERPT_TIMEOUT_SECONDS), follow_redirects=True) as client:
+                    response = await client.get(url, headers={"User-Agent": "AIGERS-Universe/1.0"})
+                    response.raise_for_status()
+                    html = response.text
+                cleaned = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
+                cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+                cleaned = re.sub(r"\s+", " ", cleaned).strip()
+                item["excerpt"] = cleaned[:1800]
             except Exception as exc:
                 logger.warning("tool.official_docs_fetch_excerpt_failed", provider=provider_key, url=url, error=str(exc))
         results.append(item)
@@ -341,19 +478,19 @@ async def official_docs_search_impl(provider: str, query: str, max_results: int 
 
 
 async def java_docs_search_impl(query: str, max_results: int = 5) -> dict:
-    return await official_docs_search_impl(provider="java", query=query, max_results=max_results)
+    return await official_docs_search_impl(provider="java", query=query, max_results=max_results, fetch_excerpts=False)
 
 
 async def python_docs_search_impl(query: str, max_results: int = 5) -> dict:
-    return await official_docs_search_impl(provider="python", query=query, max_results=max_results)
+    return await official_docs_search_impl(provider="python", query=query, max_results=max_results, fetch_excerpts=False)
 
 
 async def spring_docs_search_impl(query: str, max_results: int = 5) -> dict:
-    return await official_docs_search_impl(provider="spring", query=query, max_results=max_results)
+    return await official_docs_search_impl(provider="spring", query=query, max_results=max_results, fetch_excerpts=False)
 
 
 async def dotnet_docs_search_impl(query: str, max_results: int = 5) -> dict:
-    return await official_docs_search_impl(provider="dotnet", query=query, max_results=max_results)
+    return await official_docs_search_impl(provider="dotnet", query=query, max_results=max_results, fetch_excerpts=False)
 
 
 async def remote_agent_discover_impl(agent_card_url: str) -> dict:

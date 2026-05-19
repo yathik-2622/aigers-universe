@@ -11,3 +11,4 @@ export const pauseRun = (runId) => api.post(`/workflows/runs/${runId}/pause`).th
 export const resumeRun = (runId) => api.post(`/workflows/runs/${runId}/resume`).then(r => r.data)
 export const stopRun = (runId) => api.post(`/workflows/runs/${runId}/stop`).then(r => r.data)
 export const listAllRuns = () => api.get('/workflows/runs/all').then(r => r.data)
+export const deleteRun = (runId) => api.delete(`/workflows/runs/${runId}`).then(r => r.data)
