@@ -11,6 +11,16 @@ from db.mongo_client import get_db
 router = APIRouter()
 
 
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     description: str = Field(default="", max_length=1000)
@@ -47,7 +57,7 @@ async def list_projects(request: Request):
     user_id = require_user_id(request)
     role = get_optional_role(request)
     projects = await db.projects.find(_project_scope(user_id, role), {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"projects": projects, "count": len(projects)}
+    return {"projects": [_json_safe(project) for project in projects], "count": len(projects)}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -68,7 +78,7 @@ async def create_project(request: Request, body: CreateProjectRequest):
         "updated_at": now,
     }
     await db.projects.insert_one(doc)
-    return {**doc, "missing_member_emails": missing_emails}
+    return _json_safe({**doc, "missing_member_emails": missing_emails})
 
 
 @router.get("/{project_id}")
@@ -79,7 +89,7 @@ async def get_project(project_id: str, request: Request):
     project = await db.projects.find_one({"project_id": project_id, **_project_scope(user_id, role)}, {"_id": 0})
     if not project:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    return project
+    return _json_safe(project)
 
 
 @router.put("/{project_id}")
@@ -111,7 +121,7 @@ async def update_project(project_id: str, request: Request, body: UpdateProjectR
         projection={"_id": 0},
         return_document=ReturnDocument.AFTER,
     )
-    return {**updated, "missing_member_emails": missing_emails}
+    return _json_safe({**updated, "missing_member_emails": missing_emails})
 
 
 @router.delete("/{project_id}")
