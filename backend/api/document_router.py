@@ -31,6 +31,24 @@ MAX_FILE_SIZE_MB = 20
 TEXT_FILE_EXTENSIONS = {".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rb", ".sql", ".json", ".yaml", ".yml", ".xml", ".html", ".htm", ".toml", ".ini", ".cfg"}
 
 
+async def _download_github_archive(owner: str, repo: str) -> bytes:
+    archive_url = f"https://api.github.com/repos/{owner}/{repo}/zipball"
+    base_headers = {"Accept": "application/vnd.github+json"}
+    token = settings.GITHUB_TOKEN.strip()
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        if token:
+            authed = await client.get(archive_url, headers={**base_headers, "Authorization": f"Bearer {token}"})
+            if authed.status_code not in {401, 403}:
+                authed.raise_for_status()
+                return authed.content
+            logger.warning("doc.github_import.auth_failed_fallback", owner=owner, repo=repo, status_code=authed.status_code)
+
+        response = await client.get(archive_url, headers=base_headers)
+        response.raise_for_status()
+        return response.content
+
+
 def _extract_pdf_text(file_bytes: bytes) -> str:
     import fitz  # PyMuPDF
     doc = fitz.open(stream=file_bytes, filetype="pdf")
@@ -221,15 +239,14 @@ async def import_github_repo(request: Request, repo_url: str = Form(...), catego
     if not match:
         raise HTTPException(status_code=422, detail="Provide a valid GitHub repository URL")
     owner, repo = match.group(1), match.group(2).replace(".git", "")
-    headers = {"Accept": "application/vnd.github+json"}
-    token = settings.GITHUB_TOKEN.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    archive_url = f"https://api.github.com/repos/{owner}/{repo}/zipball"
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        response = await client.get(archive_url, headers=headers)
-        response.raise_for_status()
-        zip_bytes = response.content
+    try:
+        zip_bytes = await _download_github_archive(owner, repo)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"GitHub repository '{owner}/{repo}' was not found") from exc
+        if exc.response.status_code in {401, 403}:
+            raise HTTPException(status_code=401, detail="GitHub access failed. Check GITHUB_TOKEN for private repos, or retry with a public repository.") from exc
+        raise HTTPException(status_code=502, detail=f"GitHub archive download failed with status {exc.response.status_code}") from exc
 
     texts: list[str] = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
@@ -315,15 +332,14 @@ async def import_workflow_input_repo(request: Request, repo_url: str = Form(...)
     if not match:
         raise HTTPException(status_code=422, detail="Provide a valid GitHub repository URL")
     owner, repo = match.group(1), match.group(2).replace(".git", "")
-    headers = {"Accept": "application/vnd.github+json"}
-    token = settings.GITHUB_TOKEN.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    archive_url = f"https://api.github.com/repos/{owner}/{repo}/zipball"
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        response = await client.get(archive_url, headers=headers)
-        response.raise_for_status()
-        zip_bytes = response.content
+    try:
+        zip_bytes = await _download_github_archive(owner, repo)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"GitHub repository '{owner}/{repo}' was not found") from exc
+        if exc.response.status_code in {401, 403}:
+            raise HTTPException(status_code=401, detail="GitHub access failed. Check GITHUB_TOKEN for private repos, or retry with a public repository.") from exc
+        raise HTTPException(status_code=502, detail=f"GitHub archive download failed with status {exc.response.status_code}") from exc
 
     texts: list[str] = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
