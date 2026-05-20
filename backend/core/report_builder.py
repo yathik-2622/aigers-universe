@@ -1,7 +1,6 @@
 import json
 import re
 
-from core.llm_router import chat_completion
 from db.mongo_client import get_db
 
 
@@ -11,6 +10,21 @@ PII_PATTERNS = [
     ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     ("Credit card", re.compile(r"\b(?:\d[ -]*?){13,16}\b")),
 ]
+
+PREFERRED_TEXT_KEYS = (
+    "markdown",
+    "report_markdown",
+    "final_report",
+    "summary_markdown",
+    "sttm_markdown",
+    "ddl_sql",
+    "sql",
+    "mermaid",
+    "text",
+    "summary",
+    "description",
+    "result",
+)
 
 
 def _line_map(text: str) -> list[dict]:
@@ -38,38 +52,121 @@ def _find_pii(lines: list[dict]) -> list[dict]:
     return findings[:20]
 
 
-def _fallback_markdown(run: dict, policies: list[dict], pii_findings: list[dict]) -> str:
-    outputs = run.get("outputs_by_agent", {})
-    risk = outputs.get("Risk Analyzer", {})
-    compliance = outputs.get("Compliance Checker", {})
-    lines = [
-        f"# {run.get('workflow_name') or 'Workflow Report'}",
-        "",
-        f"**Status:** {run.get('status', 'unknown').upper()}",
-        f"**Risk level:** {risk.get('risk_level', 'UNKNOWN')}",
-        f"**Compliance:** {compliance.get('compliance_status', 'UNKNOWN')}",
-        "",
-        "## Policy Set",
-    ]
-    if policies:
-        lines.extend([f"- **{p['rule_name']}** ({p.get('severity', 'LOW')}): {p.get('description', '')}" for p in policies])
-    else:
-        lines.append("- No policies were attached to this workflow.")
-    lines.extend(["", "## PII Redlines"])
-    if pii_findings:
-        for item in pii_findings:
-            lines.append(
-                f"- Line {item['line_number']}: `{item['original_text']}` -> `{item['redacted_text']}` ({item['reason']})"
-            )
-    else:
-        lines.append("- No obvious PII patterns were detected.")
-    lines.extend(["", "## Agent Findings"])
-    for agent_name, output in outputs.items():
-        lines.append(f"### {agent_name}")
-        lines.append("```json")
-        lines.append(json.dumps(output, indent=2))
-        lines.append("```")
-    return "\n".join(lines)
+def _excerpt(text: str, limit: int = 800) -> str:
+    compact = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: max(0, limit - 3)]}..."
+
+
+def _is_probably_markdown(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    markers = ("# ", "## ", "```", "|", "- ", "* ", "1. ", "erDiagram", "CREATE TABLE")
+    return any(marker in sample for marker in markers)
+
+
+def _extract_primary_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in value:
+            candidate = _extract_primary_text(item)
+            if candidate:
+                return candidate
+        return ""
+    if isinstance(value, dict):
+        for key in PREFERRED_TEXT_KEYS:
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                text = candidate.strip()
+                if key in {"sql", "ddl_sql"} and "```" not in text:
+                    return f"```sql\n{text}\n```"
+                if key == "mermaid" and "```" not in text:
+                    return f"```mermaid\n{text}\n```"
+                return text
+        for nested in value.values():
+            candidate = _extract_primary_text(nested)
+            if candidate:
+                return candidate
+    return ""
+
+
+async def _resolve_last_agent_context(run: dict) -> dict:
+    agents = run.get("agents") or []
+    if not agents:
+        return {}
+
+    last_agent = agents[-1]
+    agent_id = last_agent.get("agent_id")
+    workflow_id = run.get("workflow_id")
+    db = get_db()
+
+    if workflow_id:
+        wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0, "canvas": 1, "agents": 1})
+        canvas_nodes = ((wf or {}).get("canvas") or {}).get("nodes") or []
+        sorted_nodes = sorted(canvas_nodes, key=lambda node: node.get("position", {}).get("x", 0))
+        for node in reversed(sorted_nodes):
+            data = node.get("data") or {}
+            if data.get("agent_id") == agent_id:
+                return {
+                    "agent_id": agent_id,
+                    "agent_name": data.get("name") or last_agent.get("agent_name") or "Final agent",
+                    "system_prompt": data.get("system_prompt", ""),
+                    "framework": data.get("framework", ""),
+                    "tools": data.get("tools", []),
+                }
+
+    if agent_id:
+        agent_doc = await db.agents.find_one({"agent_id": agent_id}, {"_id": 0, "name": 1, "system_prompt": 1, "framework": 1, "tools": 1})
+        if agent_doc:
+            return {
+                "agent_id": agent_id,
+                "agent_name": agent_doc.get("name") or last_agent.get("agent_name") or "Final agent",
+                "system_prompt": agent_doc.get("system_prompt", ""),
+                "framework": agent_doc.get("framework", ""),
+                "tools": agent_doc.get("tools", []),
+            }
+
+    return {
+        "agent_id": agent_id,
+        "agent_name": last_agent.get("agent_name") or "Final agent",
+        "system_prompt": "",
+        "framework": "",
+        "tools": [],
+    }
+
+
+def _build_domain_markdown(run: dict, last_agent: dict, final_output: dict) -> str:
+    title = run.get("workflow_name") or "Workflow Report"
+    status = (run.get("status") or "unknown").upper()
+    agent_name = last_agent.get("agent_name") or "Final agent"
+    system_prompt = (last_agent.get("system_prompt") or "").strip()
+    primary_text = _extract_primary_text(final_output)
+
+    lines = [f"# {title}", "", f"**Status:** {status}", f"**Final agent:** {agent_name}"]
+    if run.get("failure_reason"):
+        lines.append(f"**Failure reason:** {run['failure_reason']}")
+    if system_prompt:
+        lines.extend(["", "## Final Agent Objective", _excerpt(system_prompt, 1400)])
+
+    if primary_text:
+        lines.extend(["", "## Final Deliverable"])
+        if _is_probably_markdown(primary_text):
+            lines.append(primary_text)
+        else:
+            lines.extend([primary_text, ""])
+
+    lines.extend(["", "## Final Output JSON", "```json", json.dumps(final_output or {}, indent=2, default=str), "```"])
+    outputs = run.get("outputs_by_agent") or {}
+    if outputs:
+        lines.extend(["", "## Upstream Agent Outputs"])
+        for agent, output in outputs.items():
+            if agent == agent_name:
+                continue
+            lines.extend([f"### {agent}", "```json", json.dumps(output, indent=2, default=str), "```"])
+    return "\n".join(lines).strip()
 
 
 async def build_run_report(run: dict) -> dict:
@@ -77,22 +174,17 @@ async def build_run_report(run: dict) -> dict:
     input_data = run.get("input_data") or {}
     document_id = input_data.get("document_id")
     doc = await db.documents.find_one({"document_id": document_id}, {"_id": 0, "text": 1, "filename": 1}) if document_id else None
-    policies = []
-    policy_ids = run.get("policy_ids") or []
-    if policy_ids:
-        policies = await db.governance_rules.find({"rule_id": {"$in": policy_ids}}, {"_id": 0}).to_list(200)
-
     workflow_inputs = input_data.get("workflow_inputs") or {}
-    workflow_text = workflow_inputs.get("text", "")
-    uploaded_files = workflow_inputs.get("uploaded_files") or []
-    repo_input = workflow_inputs.get("github_repo") or {}
+
     fallback_sections = []
-    if workflow_text.strip():
+    workflow_text = (workflow_inputs.get("text") or "").strip()
+    if workflow_text:
         fallback_sections.append(f"Workflow text input:\n{workflow_text}")
-    for item in uploaded_files:
+    for item in workflow_inputs.get("uploaded_files") or []:
         excerpt = (item.get("text_excerpt") or "").strip()
         if excerpt:
             fallback_sections.append(f"Uploaded workflow file: {item.get('filename', 'file')}\n{excerpt}")
+    repo_input = workflow_inputs.get("github_repo") or {}
     repo_excerpt = (repo_input.get("text_excerpt") or "").strip()
     if repo_excerpt:
         fallback_sections.append(f"Workflow GitHub import: {repo_input.get('repo_url') or repo_input.get('filename', 'repo')}\n{repo_excerpt}")
@@ -100,58 +192,45 @@ async def build_run_report(run: dict) -> dict:
     text = (doc or {}).get("text", "") or "\n\n".join(fallback_sections)
     lines = _line_map(text)[:200]
     pii_findings = _find_pii(lines)
-    llm_payload = {
-        "workflow_name": run.get("workflow_name"),
+
+    last_agent = await _resolve_last_agent_context(run)
+    final_output = run.get("final_output") or {}
+    markdown = _build_domain_markdown(run, last_agent, final_output)
+
+    structured = {
+        "report_title": run.get("workflow_name") or "Workflow Report",
         "status": run.get("status"),
-        "failure_reason": run.get("failure_reason"),
-        "outputs_by_agent": run.get("outputs_by_agent", {}),
-        "final_output": run.get("final_output", {}),
-        "policies": policies,
-        "document_filename": (doc or {}).get("filename", ""),
-        "workflow_inputs": workflow_inputs,
-        "document_lines": lines,
-        "pii_findings": pii_findings,
+        "primary_agent": last_agent.get("agent_name") or "",
+        "primary_agent_prompt": last_agent.get("system_prompt", ""),
+        "summary": _excerpt(_extract_primary_text(final_output) or json.dumps(final_output, default=str), 1200),
+        "final_output": final_output,
+        "workflow_inputs_present": {
+            "knowledge_base_document": bool(doc),
+            "uploaded_file_count": len(workflow_inputs.get("uploaded_files") or []),
+            "github_repo": bool(repo_input),
+        },
+        "citations": [],
+        "markdown": markdown,
     }
-    try:
-        response = await chat_completion(
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a legal operations reviewer. Produce ONLY valid JSON with keys: "
-                        "executive_summary (string), overall_decision (string), redlines (array of objects with line_number, "
-                        "issue, original_text, suggested_text, policy_reference), pii_findings (array), "
-                        "policy_recommendations (array of strings), next_actions (array of strings), citations (array of objects with label, excerpt, source_type, source_ref), markdown (string). "
-                        "The markdown must be human-readable with headings, bullets, and concise policy-aligned guidance."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(llm_payload, default=str)[:14000]},
-            ],
-            caller="workflow_report_builder",
-            response_format={"type": "json_object"},
-        )
-        parsed = json.loads(response["content"])
-        markdown = parsed.get("markdown") or _fallback_markdown(run, policies, pii_findings)
-        return {
-            "structured": parsed,
-            "markdown": markdown,
-            "pii_findings": parsed.get("pii_findings", pii_findings),
-            "citations": parsed.get("citations", []),
-        }
-    except Exception:
-        markdown = _fallback_markdown(run, policies, pii_findings)
-        return {
-            "structured": {
-                "executive_summary": "Fallback report generated because structured synthesis was unavailable.",
-                "overall_decision": run.get("status", "unknown").upper(),
-                "redlines": [],
-                "pii_findings": pii_findings,
-                "policy_recommendations": [],
-                "next_actions": [],
-                "citations": [],
-                "markdown": markdown,
-            },
-            "markdown": markdown,
-            "pii_findings": pii_findings,
-            "citations": [],
-        }
+    if doc:
+        structured["citations"].append({
+            "label": doc.get("filename", "knowledge-base document"),
+            "excerpt": _excerpt((doc.get("text") or ""), 240),
+            "source_type": "knowledge_base_document",
+            "source_ref": doc.get("filename", ""),
+        })
+    for item in workflow_inputs.get("uploaded_files") or []:
+        if (item.get("text_excerpt") or "").strip():
+            structured["citations"].append({
+                "label": item.get("filename", "workflow-input"),
+                "excerpt": _excerpt(item.get("text_excerpt", ""), 240),
+                "source_type": "workflow_input",
+                "source_ref": item.get("document_id", ""),
+            })
+
+    return {
+        "structured": structured,
+        "markdown": markdown,
+        "pii_findings": pii_findings,
+        "citations": structured["citations"],
+    }

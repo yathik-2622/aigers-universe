@@ -77,6 +77,23 @@ def _parse_iso(value: str | None) -> datetime.datetime | None:
         return None
 
 
+def _context_excerpt(text: str, limit: int = 24000) -> str:
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    head = int(limit * 0.45)
+    middle = int(limit * 0.2)
+    tail = max(0, limit - head - middle - 40)
+    midpoint = len(value) // 2
+    middle_start = max(0, midpoint - (middle // 2))
+    middle_end = min(len(value), middle_start + middle)
+    return "\n...\n".join([
+        value[:head].rstrip(),
+        value[middle_start:middle_end].strip(),
+        value[-tail:].lstrip(),
+    ])
+
+
 async def _hydrate_workflow_inputs(input_data: dict) -> dict:
     workflow_inputs = dict((input_data or {}).get("workflow_inputs") or {})
     upload_ids = workflow_inputs.get("upload_document_ids") or []
@@ -88,7 +105,7 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
     all_ids = list(dict.fromkeys([*upload_ids, *([repo_document_id] if repo_document_id else [])]))
     docs = await db.documents.find(
         {"document_id": {"$in": all_ids}},
-        {"_id": 0, "document_id": 1, "filename": 1, "category": 1, "text": 1, "text_length": 1, "source_meta": 1, "scope": 1},
+        {"_id": 0, "document_id": 1, "filename": 1, "category": 1, "text": 1, "context_excerpt": 1, "text_length": 1, "source_meta": 1, "scope": 1},
     ).to_list(len(all_ids) or 1)
     docs_by_id = {doc["document_id"]: doc for doc in docs}
 
@@ -99,7 +116,7 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
             "category": docs_by_id[doc_id].get("category", ""),
             "scope": docs_by_id[doc_id].get("scope", "workflow_input"),
             "text_length": docs_by_id[doc_id].get("text_length", 0),
-            "text_excerpt": (docs_by_id[doc_id].get("text", "") or "")[:6000],
+            "text_excerpt": docs_by_id[doc_id].get("context_excerpt") or _context_excerpt(docs_by_id[doc_id].get("text", "")),
         }
         for doc_id in upload_ids
         if doc_id in docs_by_id
@@ -111,7 +128,7 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
             "filename": repo_doc.get("filename", ""),
             "repo_url": (repo_doc.get("source_meta") or {}).get("repo_url", workflow_inputs.get("repo_url", "")),
             "text_length": repo_doc.get("text_length", 0),
-            "text_excerpt": (repo_doc.get("text", "") or "")[:10000],
+            "text_excerpt": repo_doc.get("context_excerpt") or _context_excerpt(repo_doc.get("text", ""), limit=18000),
         }
 
     return {**(input_data or {}), "workflow_inputs": workflow_inputs}

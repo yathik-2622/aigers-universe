@@ -10,6 +10,7 @@ import json
 import re
 import zipfile
 import structlog
+from collections.abc import Iterator
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, File, status
 import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -29,6 +30,50 @@ ALLOWED_EXTENSIONS = {
 }
 MAX_FILE_SIZE_MB = 20
 TEXT_FILE_EXTENSIONS = {".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rb", ".sql", ".json", ".yaml", ".yml", ".xml", ".html", ".htm", ".toml", ".ini", ".cfg"}
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "")).strip()
+
+
+def _render_markdown_table(rows: list[list[str]], label_prefix: str) -> str:
+    cleaned_rows = [[_normalize_text(cell) for cell in row] for row in rows]
+    cleaned_rows = [row for row in cleaned_rows if any(row)]
+    if not cleaned_rows:
+        return ""
+
+    width = max(len(row) for row in cleaned_rows)
+    padded_rows = [row + [""] * (width - len(row)) for row in cleaned_rows]
+    headers = padded_rows[0]
+    data_rows = padded_rows[1:]
+    if not any(headers):
+        headers = [f"column_{index + 1}" for index in range(width)]
+    headers = ["row_ref", *headers]
+
+    lines = [
+        f"| {' | '.join(headers)} |",
+        f"| {' | '.join(['---'] * len(headers))} |",
+    ]
+    for index, row in enumerate(data_rows, start=1):
+        lines.append(f"| {' | '.join([f'{label_prefix}_row_{index}', *[cell or ' ' for cell in row]])} |")
+    return "\n".join(lines)
+
+
+def _context_excerpt(text: str, limit: int = 24000) -> str:
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    head = int(limit * 0.45)
+    middle = int(limit * 0.2)
+    tail = max(0, limit - head - middle - 40)
+    midpoint = len(value) // 2
+    middle_start = max(0, midpoint - (middle // 2))
+    middle_end = min(len(value), middle_start + middle)
+    return "\n...\n".join([
+        value[:head].rstrip(),
+        value[middle_start:middle_end].strip(),
+        value[-tail:].lstrip(),
+    ])
 
 
 async def _download_github_archive(owner: str, repo: str) -> bytes:
@@ -51,16 +96,77 @@ async def _download_github_archive(owner: str, repo: str) -> bytes:
 
 def _extract_pdf_text(file_bytes: bytes) -> str:
     import fitz  # PyMuPDF
+
+    def _sorted_blocks(page):
+        blocks = page.get_text("blocks")
+        return sorted(blocks, key=lambda block: (round(block[1], 1), round(block[0], 1)))
+
+    def _extract_page_tables(page, page_number: int) -> list[str]:
+        if not hasattr(page, "find_tables"):
+            return []
+        sections: list[str] = []
+        try:
+            tables = page.find_tables()
+        except Exception:
+            return []
+        for table_index, table in enumerate(getattr(tables, "tables", []) or [], start=1):
+            extracted = table.extract() or []
+            markdown = _render_markdown_table(extracted, f"page_{page_number}_table_{table_index}")
+            if markdown:
+                sections.append(f"### Page {page_number} Table {table_index}\n{markdown}")
+        return sections
+
     doc = fitz.open(stream=file_bytes, filetype="pdf")
-    pages = [page.get_text() for page in doc]
+    pages = []
+    for page_number, page in enumerate(doc, start=1):
+        parts = [f"## Page {page_number}"]
+        parts.extend(_extract_page_tables(page, page_number))
+        block_lines = []
+        for block in _sorted_blocks(page):
+            text = _normalize_text(block[4] if len(block) > 4 else "")
+            if text:
+                block_lines.append(text)
+        page_text = "\n".join(block_lines).strip() or page.get_text("text", sort=True).strip()
+        if page_text:
+            parts.extend(["### Page Text", page_text])
+        pages.append("\n\n".join(part for part in parts if part))
     doc.close()
     return "\n".join(pages)
 
 
 def _extract_docx_text(file_bytes: bytes) -> str:
     from docx import Document as DocxDocument
+    from docx.document import Document as DocxDocumentType
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    def _iter_blocks(parent) -> Iterator[Paragraph | Table]:
+        parent_elm = parent.element.body if isinstance(parent, DocxDocumentType) else parent._tc
+        for child in parent_elm.iterchildren():
+            if isinstance(child, CT_P):
+                yield Paragraph(child, parent)
+            elif isinstance(child, CT_Tbl):
+                yield Table(child, parent)
+
     doc = DocxDocument(io.BytesIO(file_bytes))
-    return "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
+    sections: list[str] = []
+    table_index = 0
+    paragraph_index = 0
+    for block in _iter_blocks(doc):
+        if isinstance(block, Paragraph):
+            text = _normalize_text(block.text)
+            if text:
+                paragraph_index += 1
+                sections.append(f"[PARAGRAPH {paragraph_index}] {text}")
+            continue
+        table_index += 1
+        rows = [[_normalize_text(cell.text) for cell in row.cells] for row in block.rows]
+        markdown = _render_markdown_table(rows, f"table_{table_index}")
+        if markdown:
+            sections.append(f"## DOCX Table {table_index}\n{markdown}")
+    return "\n\n".join(sections)
 
 
 def _extract_html_text(file_bytes: bytes) -> str:
@@ -146,6 +252,7 @@ async def _store_document_text(
         "source_meta": source_meta or {},
         "file_size_bytes": int(file_size_bytes or 0),
         "text": text,
+        "context_excerpt": _context_excerpt(text),
         "text_length": len(text),
         "chunk_count": len(chunks),
         "vector_ids": vector_ids,
@@ -156,7 +263,7 @@ async def _store_document_text(
         "document_id": document_id,
         "filename": filename,
         "category": category.strip().lower() or "general",
-        "text_preview": text[:300],
+        "text_preview": _context_excerpt(text, limit=800),
         "text_length": len(text),
         "chunk_count": len(chunks),
         "vectors_indexed": len(vector_ids),

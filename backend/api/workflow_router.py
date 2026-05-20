@@ -34,6 +34,18 @@ DEFAULT_INPUT_BINDINGS = {
 FRAMEWORK_TAGS = {"langgraph", "langchain", "crewai", "agno"}
 
 
+def _report_needs_rematerialization(run: dict) -> bool:
+    markdown = (run.get("report_markdown") or "").strip()
+    structured = run.get("report_structured") or {}
+    if not markdown:
+        return True
+    if structured.get("primary_agent"):
+        return False
+    if structured.get("overall_decision") or structured.get("executive_summary"):
+        return True
+    return markdown.startswith("Review Summary:")
+
+
 def _parse_iso(value: str | None) -> datetime.datetime | None:
     if not value:
         return None
@@ -541,6 +553,29 @@ async def create_workflow(request: Request, body: CreateWorkflowRequest):
     return {"workflow_id": workflow_id, "name": body.name}
 
 
+@router.put("/{workflow_id}")
+async def update_workflow(workflow_id: str, request: Request, body: CreateWorkflowRequest):
+    db = get_db()
+    existing = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0, "workflow_id": 1, "owner_user_id": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
+    role = get_optional_role(request)
+    user_id = get_optional_user_id(request)
+    if role != "admin" and existing.get("owner_user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Only the workflow owner or an admin can edit this workflow")
+    await db.workflow_definitions.update_one(
+        {"workflow_id": workflow_id},
+        {
+            "$set": {
+                **body.model_dump(),
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        },
+    )
+    logger.info("api.workflow.updated", workflow_id=workflow_id, name=body.name)
+    return {"workflow_id": workflow_id, "name": body.name, "updated": True}
+
+
 @router.post("/auto-build")
 async def auto_build_workflow(request: Request, body: AutoBuildWorkflowRequest):
     db = get_db()
@@ -718,7 +753,7 @@ async def get_run_report_materialized(run_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     if run["status"] not in ("completed", "failed"):
         raise HTTPException(status_code=409, detail=f"Run status is '{run['status']}' - report not ready")
-    if not (run.get("report_markdown") or "").strip():
+    if _report_needs_rematerialization(run):
         logger.info("api.workflow.report.materializing", run_id=run_id, status=run["status"])
         report = await build_run_report(run)
         await db.workflow_runs.update_one(
