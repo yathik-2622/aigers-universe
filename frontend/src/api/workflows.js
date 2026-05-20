@@ -3,6 +3,7 @@ import { api } from './client'
 export const listWorkflows = () => api.get('/workflows').then(r => r.data)
 export const getWorkflow = (id) => api.get(`/workflows/${id}`).then(r => r.data)
 export const createWorkflow = (body) => api.post('/workflows', body).then(r => r.data)
+export const updateWorkflow = (id, body) => api.put(`/workflows/${id}`, body).then(r => r.data)
 export const autoBuildWorkflow = (body) => api.post('/workflows/auto-build', body).then(r => r.data)
 export const runWorkflow = (id, body) => api.post(`/workflows/${id}/run`, body).then(r => r.data)
 export const getRun = (runId) => api.get(`/workflows/runs/${runId}`).then(r => r.data)

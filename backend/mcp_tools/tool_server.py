@@ -35,6 +35,18 @@ OFFICIAL_DOCS_PROVIDERS = {
 }
 
 
+def _normalize_hitl_severity(severity: str) -> str:
+    value = (severity or "").strip().upper()
+    aliases = {
+        "CRITICAL": "HIGH",
+        "SEVERE": "HIGH",
+        "WARN": "MEDIUM",
+        "WARNING": "MEDIUM",
+        "INFO": "LOW",
+    }
+    return aliases.get(value, value)
+
+
 async def _check_db_health() -> dict:
     try:
         db = get_db()
@@ -151,8 +163,15 @@ async def knowledge_base_search_impl(query: str, top_k: int = 5) -> dict:
 async def document_store_impl(action: str, collection: str, data: dict | None = None, query: dict | None = None, limit: int = 50) -> dict:
     """Generic MongoDB CRUD for agent-owned structured data."""
     logger.info("tool.document_store.called", action=action, collection=collection)
-    safe_collection = f"agent_data_{collection}"
     db = get_db()
+    normalized_collection = (collection or "").strip().lower()
+    if normalized_collection in {"documents", "workspace_documents", "uploaded_documents"}:
+        if action != "retrieve":
+            raise ValueError("Documents collection supports retrieve action only")
+        docs = await db.documents.find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
+        return {"success": True, "data": docs, "count": len(docs), "collection": "documents"}
+
+    safe_collection = f"agent_data_{collection}"
 
     if action == "store":
         if not data:
@@ -521,6 +540,7 @@ async def trigger_hitl_impl(
     context: dict | None = None,
 ) -> dict:
     """Pause workflow and create a HITL record awaiting human review."""
+    severity = _normalize_hitl_severity(severity)
     if severity not in ("HIGH", "MEDIUM", "LOW"):
         raise ValueError(f"severity must be HIGH/MEDIUM/LOW, got '{severity}'")
 

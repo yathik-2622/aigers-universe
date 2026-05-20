@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { listProjects } from '../api/projects.js'
 import { listAgents } from '../api/platform.js'
 import { importGithubRepo, importWorkflowGithubRepo, uploadDocument, uploadWorkflowInput, listDocuments } from '../api/documents.js'
-import { autoBuildWorkflow, createWorkflow, getWorkflow, runWorkflow } from '../api/workflows.js'
+import { autoBuildWorkflow, createWorkflow, getWorkflow, runWorkflow, updateWorkflow } from '../api/workflows.js'
 import CustomSelect from '../components/common/CustomSelect.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
@@ -291,8 +291,8 @@ export default function WorkflowBuilderPage() {
         policy_ids: [],
         canvas: { nodes, edges },
       }
-      const res = await createWorkflow(body)
-      toast.success('Workflow saved')
+      const res = savedId ? await updateWorkflow(savedId, body) : await createWorkflow(body)
+      toast.success(savedId ? 'Workflow updated' : 'Workflow saved')
       setSavedId(res.workflow_id)
       navigate(`/builder/${res.workflow_id}`, { replace: true })
       return res.workflow_id

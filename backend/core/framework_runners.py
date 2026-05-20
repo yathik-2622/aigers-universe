@@ -103,13 +103,64 @@ def _safe_message_name(value: str) -> str:
     return safe[:64]
 
 
+def _normalize_tool_kwargs(kwargs: dict) -> dict:
+    nested = kwargs.get("kwargs")
+    if isinstance(nested, dict):
+        merged = dict(nested)
+        for key, value in kwargs.items():
+            if key != "kwargs":
+                merged.setdefault(key, value)
+        return merged
+    return kwargs
+
+
+def _looks_like_document_store_lookup(tool_name: str, normalized: dict) -> bool:
+    if tool_name == "document_store":
+        return True
+    if "document_id" in normalized:
+        return True
+    action = normalized.get("action")
+    return action in {"store", "retrieve"} and ("collection" in normalized or "query" in normalized)
+
+
+def _coerce_tool_input(tool_name: str, kwargs: dict) -> dict:
+    normalized = _normalize_tool_kwargs(kwargs)
+    if not _looks_like_document_store_lookup(tool_name, normalized):
+        return normalized
+
+    document_id = normalized.get("document_id")
+    action = normalized.get("action")
+    collection = normalized.get("collection")
+    query = dict(normalized.get("query") or {})
+
+    if document_id:
+        query.setdefault("document_id", document_id)
+
+    if not action:
+        action = "retrieve" if query else "store"
+
+    if not collection and (document_id or action == "retrieve"):
+        collection = "documents"
+
+    coerced = dict(normalized)
+    coerced["action"] = action
+    if collection:
+        coerced["collection"] = collection
+    if query:
+        coerced["query"] = query
+    if action == "retrieve":
+        coerced.setdefault("limit", 1 if document_id else 50)
+    coerced.pop("document_id", None)
+    return coerced
+
+
 def _make_crewai_tool(base_tool, tool):
     name = base_tool.name
     description = base_tool.description or name
 
     async def _wrapped_tool(**kwargs):
         """CrewAI tool wrapper."""
-        result = await base_tool.ainvoke(kwargs)
+        result = await base_tool.ainvoke(_coerce_tool_input(name, kwargs))
         return result if isinstance(result, str) else json.dumps(result, default=str)
 
     _wrapped_tool.__doc__ = description
@@ -136,7 +187,7 @@ def _make_agno_tool(base_tool, tool):
 
     @tool
     async def _wrapped_tool(**kwargs):
-        result = await base_tool.ainvoke(kwargs)
+        result = await base_tool.ainvoke(_coerce_tool_input(name, kwargs))
         return result if isinstance(result, str) else json.dumps(result, default=str)
 
     _wrapped_tool.__name__ = name
@@ -145,7 +196,53 @@ def _make_agno_tool(base_tool, tool):
 
 
 def _compose_user_message(input_data: dict, upstream_messages: list[dict] | None, selected_policy_ids: list[str]) -> str:
-    user_parts = [f"INPUT DATA:\n{json.dumps(input_data, default=str)[:6000]}"]
+    original_input = dict(input_data.get("original_input") or {})
+    workflow_inputs = dict(original_input.get("workflow_inputs") or {})
+    high_level_input = {
+        key: value
+        for key, value in original_input.items()
+        if key not in {"workflow_inputs"}
+    }
+
+    user_parts = []
+    if high_level_input:
+        user_parts.append(f"INPUT DATA:\n{json.dumps(high_level_input, default=str)[:5000]}")
+
+    workflow_text = (workflow_inputs.get("text") or "").strip()
+    if workflow_text:
+        user_parts.append(f"WORKFLOW TEXT INPUT:\n{workflow_text[:18000]}")
+
+    uploaded_files = workflow_inputs.get("uploaded_files") or []
+    for index, item in enumerate(uploaded_files, start=1):
+        excerpt = (item.get("text_excerpt") or "").strip()
+        if not excerpt:
+            continue
+        user_parts.append(
+            "\n".join(
+                [
+                    f"UPLOADED WORKFLOW FILE {index}: {item.get('filename', 'file')}",
+                    f"Category: {item.get('category', 'general')}",
+                    f"Document ID: {item.get('document_id', '')}",
+                    excerpt[:24000],
+                ]
+            )
+        )
+
+    github_repo = workflow_inputs.get("github_repo") or {}
+    repo_excerpt = (github_repo.get("text_excerpt") or "").strip()
+    if repo_excerpt:
+        user_parts.append(
+            "\n".join(
+                [
+                    f"GITHUB REPO INPUT: {github_repo.get('repo_url') or github_repo.get('filename', 'repo')}",
+                    repo_excerpt[:18000],
+                ]
+            )
+        )
+
+    if input_data.get("previous_outputs"):
+        user_parts.append(f"PREVIOUS OUTPUTS:\n{json.dumps(input_data.get('previous_outputs'), default=str)[:12000]}")
+
     if upstream_messages:
         upstream_summary = json.dumps(
             [{"from": m["from_agent"], "type": m["message_type"], "payload": m["payload"]} for m in upstream_messages],
@@ -155,6 +252,11 @@ def _compose_user_message(input_data: dict, upstream_messages: list[dict] | None
     if selected_policy_ids:
         user_parts.append(
             f"\nSELECTED POLICY IDS:\n{json.dumps(selected_policy_ids)}\nUse these policies when performing compliance or redline work."
+        )
+    if original_input.get("document_id") and original_input.get("kb_mode") != "disabled":
+        user_parts.append(
+            f"\nKNOWLEDGE BASE DOCUMENT:\nDocument ID {original_input.get('document_id')} | Filename: {original_input.get('filename', '')}\n"
+            "Use the knowledge-base and semantic-search tools to ground your answer when needed."
         )
     return "\n".join(user_parts)
 
