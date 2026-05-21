@@ -180,15 +180,15 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "type": "function",
         "function": {
             "name": "official_docs_search",
-            "description": "Search official docs providers such as Oracle Java, Python, Spring, .NET, React, Next.js, and Streamlit.",
+            "description": "Search official docs across supported languages, frameworks, clouds, and databases. Use provider='all' for broad official-docs discovery.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "provider": {"type": "string", "enum": ["java", "python", "spring", "dotnet", "react", "nextjs", "streamlit"]},
+                    "provider": {"type": "string", "enum": ["all", "auto", "java", "python", "spring", "dotnet", "react", "nextjs", "streamlit", "fastapi", "postgresql", "mysql", "mongodb", "docker", "kubernetes", "aws", "azure", "gcp"]},
                     "query": {"type": "string"},
                     "max_results": {"type": "integer", "default": 5},
                 },
-                "required": ["provider", "query"],
+                "required": ["query"],
             },
         },
     },

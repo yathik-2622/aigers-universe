@@ -38,11 +38,11 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Knowledge-base uploads now support categories, broader text/code/document formats, and GitHub repository import for modernization-style use cases.
 - AIger Copilot now replaces the old MCP Studio as a session-based chat workspace with history, mode guardrails, model/tool selection, chat-scoped file attachments, installed-agent awareness, and platform-grounded guidance.
 - AIger Copilot now includes collapsible history, inline rename/delete controls, backend-streamed responses, live reasoning logs, follow-up question suggestions, citations with popup previews, and a lighter chat-first UX.
-- Marketplace cards now surface template-specific recommended models instead of defaulting every template to the same model.
+- Marketplace agents now default to `gpt-4o`, while each signed-in user can override provider, keys, base URL, default model, and theme from the in-app Settings page.
 - The landing page now uses a cleaner cyberpunk product layout with less crowding and more direct feature communication.
 - Workflow Builder now separates reusable KB context from run-scoped workflow inputs: text, uploaded files, and GitHub repo snapshots.
 - Agent nodes now support per-node workflow input bindings so the same installed agent can see different inputs in different workflows.
-- Official-doc tooling now includes Java, Python, Spring, and .NET adapters backed by live documentation search/fetch.
+- Official-doc tooling now supports broader official documentation discovery across languages, frameworks, clouds, and data platforms through a shared `official_docs_search` tool plus focused adapters.
 - Network-facing A2A endpoints now expose local agent cards and remote invoke routes for federated agent interoperability over HTTP.
 - Agents page now includes a local agent-card helper section with one-click card URL copy for remote A2A setup.
 - Remote A2A configuration now includes a "Test remote card" validation action before saving.
@@ -60,6 +60,8 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Admin-side project deletion from the control tower.
 - In-app document preview modals and more operator-friendly toast/modal interactions.
 - Agent model selection from the gateway model catalog.
+- Runtime settings now support OpenAI-compatible gateways, OpenRouter, Groq, and NVIDIA model discovery with per-user secrets stored in MongoDB.
+- AI responses now render structured JSON, markdown tables, code fences, and Mermaid `erDiagram` content in the UI instead of collapsing everything into plain text.
 - Mongo-backed workflow resume after interruption or backend restart.
 - Migration marketplace now includes framework-native CrewAI and Agno templates for Java, Spring Boot, Python, Streamlit, React, Next.js, and .NET modernization tasks.
 
@@ -158,9 +160,9 @@ Required `.env` values:
 
 | Key | Example | Notes |
 |---|---|---|
-| `LLM_BASE_URL` | `https://api.ai-gateway.tigeranalytics.com` | OpenAI-compatible endpoint |
-| `LLM_API_KEY` | `sk-...` | Your Tiger Analytics gateway key |
-| `LLM_MODEL` | `gpt-4o` | Override if your gateway uses different ids |
+| `LLM_BASE_URL` | `https://api.ai-gateway.tigeranalytics.com` | Default OpenAI-compatible endpoint. Users can override per account in Settings |
+| `LLM_API_KEY` | `sk-...` | Default gateway key. Users can override per account in Settings |
+| `LLM_MODEL` | `gpt-4o` | Default fallback model used before per-user settings are applied |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | 1536-dim |
 | `MONGO_URL` | `mongodb://localhost:27017` | Local Mongo |
 | `DB_NAME` | `aigers_universe` |  |
@@ -222,6 +224,18 @@ VITE_REACT_APP_BACKEND_URL=http://localhost:8001
 ```
 
 Frontend dev server: <http://localhost:3000>
+
+### 3.1 · Configure runtime settings in the UI
+
+After signing in, open **Settings** in the left sidebar.
+
+- Choose a provider: `Platform Gateway`, `Custom OpenAI Gateway`, `OpenRouter`, `Groq`, or `NVIDIA`
+- Save the provider-specific API key
+- For `Custom OpenAI Gateway`, also save the base URL
+- Refresh the discovered model catalog and choose your default chat/agent model
+- Optionally switch between dark and light theme
+
+These settings are stored per user in MongoDB and are used by chat, workflow agents, marketplace installs, and provider-backed model dropdowns.
 
 ### 4 · VS Code launch config (optional but nice)
 Create `.vscode/launch.json`:

@@ -10,23 +10,7 @@ logger = structlog.get_logger(__name__)
 
 
 def _recommended_model_for_template(template: dict) -> str:
-    text = " ".join([
-        template.get("name", ""),
-        template.get("description", ""),
-        " ".join(template.get("tags", [])),
-        " ".join(template.get("suggested_tools", [])),
-        template.get("category", ""),
-    ]).lower()
-    framework = (template.get("framework") or "").lower()
-    if any(token in text for token in ["migration", "modernization", "spring", "java", "dotnet", "python", "portfolio", "strategy", "planner", "architect", "risk board"]):
-        return "gpt-5"
-    if any(token in text for token in ["compliance", "security", "policy", "governance", "risk", "review"]):
-        return "o3"
-    if framework in {"crewai", "agno"}:
-        return "gpt-4.1"
-    if any(token in text for token in ["extractor", "classifier", "mapper", "triager", "weather", "documentation"]):
-        return "gpt-4.1-mini"
-    return settings.LLM_MODEL
+    return "gpt-4o"
 
 
 MARKETPLACE_TEMPLATES = [

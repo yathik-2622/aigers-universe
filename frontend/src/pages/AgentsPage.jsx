@@ -9,6 +9,7 @@ import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import ModelBadge from '../components/common/ModelBadge.jsx'
 import { deleteAgent, exportAgentCode, listAgents, listModels, listTools, registerAgent } from '../api/platform.js'
 import { listAgentCards, validateRemoteCard } from '../api/a2a.js'
+import { normalizeModelOptions } from '../lib/modelOptions.js'
 
 const EXPORT_FRAMEWORKS = [
   { value: 'langgraph', label: 'LangGraph Python' },
@@ -48,7 +49,7 @@ export default function AgentsPage() {
   useEffect(() => {
     load()
     listTools().then(d => setTools(d.tools || []))
-    listModels().then(d => setModels(d.models || []))
+    listModels().then(d => setModels(normalizeModelOptions(d.models || [])))
     listAgentCards().then(d => setAgentCards(d.cards || [])).catch(() => {})
   }, [])
 

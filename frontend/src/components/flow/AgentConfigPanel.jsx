@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { listModels, listTools, updateAgent } from '../../api/platform.js'
 import { validateRemoteCard } from '../../api/a2a.js'
 import CustomSelect from '../common/CustomSelect.jsx'
+import { normalizeModelOptions } from '../../lib/modelOptions.js'
 
 export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) {
   const [tools, setTools] = useState([])
@@ -31,7 +32,7 @@ export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) 
 
   useEffect(() => {
     listTools().then(d => setTools(d.tools || [])).catch(() => {})
-    listModels().then(d => setModels(d.models || [])).catch(() => {})
+    listModels().then(d => setModels(normalizeModelOptions(d.models || []))).catch(() => {})
   }, [])
   useEffect(() => {
     if (!node) return

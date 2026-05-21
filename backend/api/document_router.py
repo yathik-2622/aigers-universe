@@ -17,6 +17,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
 from core.request_context import get_optional_user_id
+from core.runtime_settings import resolve_external_key
 from db.mongo_client import get_db
 from vectorstore.faiss_store import add_document
 
@@ -79,7 +80,7 @@ def _context_excerpt(text: str, limit: int = 24000) -> str:
 async def _download_github_archive(owner: str, repo: str) -> bytes:
     archive_url = f"https://api.github.com/repos/{owner}/{repo}/zipball"
     base_headers = {"Accept": "application/vnd.github+json"}
-    token = settings.GITHUB_TOKEN.strip()
+    token = await resolve_external_key("github_token")
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         if token:

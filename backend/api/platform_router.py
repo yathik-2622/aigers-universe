@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from core.agent_code_export import export_agent_code
 from core.request_context import get_optional_user_id
+from core.runtime_settings import discover_models_for_user
 from db.repositories.agent_repo import AgentRepository
 from core.agent_registry import invoke_agent_by_id
 from core.framework_runners import get_framework_runtime_health
@@ -19,24 +20,6 @@ router = APIRouter()
 repo = AgentRepository()
 
 VALID_FRAMEWORKS = {"langgraph", "crewai", "langchain", "agno"}
-AVAILABLE_MODELS = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "gpt-5",
-    "gpt-5-mini",
-    "o3",
-    "o4-mini",
-    "claude-3.7-sonnet",
-    "claude-sonnet-4.5",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "llama-3.3-70b-instruct",
-    "phi-4-reasoning",
-]
-
-
 class RegisterAgentRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     framework: str = Field(..., description="langgraph | crewai | langchain | agno")
@@ -160,8 +143,8 @@ async def framework_health():
 
 
 @router.get("/models")
-async def list_available_models():
-    return {"models": AVAILABLE_MODELS, "default": "gpt-4o"}
+async def list_available_models(request: Request):
+    return await discover_models_for_user(get_optional_user_id(request))
 
 
 @router.get("/marketplace/smoke-test")
