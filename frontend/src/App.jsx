@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import Header from './components/layout/Header.jsx'
 import Sidebar from './components/layout/Sidebar.jsx'
 import { useAuth } from './context/AuthContext.jsx'
+import { useSettings } from './context/SettingsContext.jsx'
 import { TitleProvider } from './context/TitleContext.jsx'
 import AgentsPage from './pages/AgentsPage.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -15,6 +16,7 @@ import ObservabilityPage from './pages/ObservabilityPage.jsx'
 import ProjectsPage from './pages/ProjectsPage.jsx'
 import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
 
@@ -41,6 +43,7 @@ function ProtectedShell() {
               <Route path="/runs/:runId" element={<WorkflowRunPage />} />
               <Route path="/hitl" element={<HITLPage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
@@ -52,6 +55,8 @@ function ProtectedShell() {
 }
 
 export default function App() {
+  const { settings } = useSettings()
+  const dark = (settings?.theme || 'dark') !== 'light'
   return (
     <>
       <Routes>
@@ -60,16 +65,16 @@ export default function App() {
         <Route path="/*" element={<ProtectedShell />} />
       </Routes>
       <Toaster
-        theme="dark"
+        theme={dark ? 'dark' : 'light'}
         position="bottom-right"
         toastOptions={{
           style: {
-            background: 'linear-gradient(180deg, rgba(15,19,36,0.96), rgba(10,12,24,0.96))',
-            border: '1px solid rgba(255,255,255,0.12)',
-            color: '#e9e9f7',
+            background: dark ? 'linear-gradient(180deg, rgba(15,19,36,0.96), rgba(10,12,24,0.96))' : 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(242,246,252,0.96))',
+            border: dark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.08)',
+            color: dark ? '#e9e9f7' : '#0f172a',
             borderRadius: '18px',
             backdropFilter: 'blur(12px)',
-            boxShadow: '0 18px 60px rgba(0,0,0,0.28)',
+            boxShadow: dark ? '0 18px 60px rgba(0,0,0,0.28)' : '0 18px 60px rgba(15,23,42,0.12)',
           },
         }}
       />

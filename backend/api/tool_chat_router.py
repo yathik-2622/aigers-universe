@@ -22,8 +22,9 @@ from api.document_router import (
 )
 from config import settings
 from core.agent_registry import TOOL_SCHEMAS, invoke_agent_by_id
-from core.llm_router import _client
+from core.llm_router import _build_client
 from core.request_context import require_user_id
+from core.runtime_settings import discover_models_for_user
 from db.mongo_client import get_db
 from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
 
@@ -274,22 +275,7 @@ async def _search_platform_catalog(user_id: str, query: str) -> dict:
         "installed_agents": [{k: v for k, v in item.items() if k != "score"} for item in ranked_agents[:10]],
         "marketplace_templates": [{k: v for k, v in item.items() if k != "score"} for item in ranked_templates[:12]],
         "tools": [{k: v for k, v in item.items() if k != "score"} for item in ranked_tools[:12]],
-        "models": [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-5",
-            "gpt-5-mini",
-            "o3",
-            "o4-mini",
-            "claude-3.7-sonnet",
-            "claude-sonnet-4.5",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "llama-3.3-70b-instruct",
-            "phi-4-reasoning",
-        ],
+        "models": (await discover_models_for_user(user_id)).get("models", []),
     }
 
 
@@ -429,6 +415,7 @@ async def _build_platform_context(user_id: str, session: dict) -> str:
 
 async def _generate_follow_up_questions(
     *,
+    user_id: str,
     mode: str,
     model_name: str,
     user_message: str,
@@ -444,9 +431,10 @@ async def _generate_follow_up_questions(
             "Generate exactly three concise follow-up questions a user might ask next about AIger's Universe, "
             "its agents, workflows, tools, architecture, or how to use the platform for the current use case. "
             "Return only valid JSON in the form {\"questions\": [\"...\", \"...\", \"...\"]}."
-        )
+    )
     try:
-        response = await _client.chat.completions.create(
+        client, _runtime = await _build_client(user_id)
+        response = await client.chat.completions.create(
             model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -508,7 +496,7 @@ async def _run_chat_completion(
     model_name: str,
     preferred_tool: str | None,
     enabled_tools: list[str],
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], list[dict]]:
     processing_logs: list[dict] = []
     _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
     platform_context = await _build_platform_context(user_id=user_id, session=session)
@@ -520,7 +508,8 @@ async def _run_chat_completion(
     forced_tool = preferred_tool if preferred_tool in enabled_tools else None
     _log_step(processing_logs, "Invoke model", f"Calling {model_name} with {len(tools_payload)} available tool definitions.")
 
-    response = await _client.chat.completions.create(
+    client, _runtime = await _build_client(user_id)
+    response = await client.chat.completions.create(
         model=model_name,
         messages=messages,
         tools=tools_payload,
@@ -553,7 +542,7 @@ async def _run_chat_completion(
             tool_call_id = assistant_tool_calls[idx]["id"]
             followup_messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(item["result"], default=_json_default)})
         _log_step(processing_logs, "Synthesize answer", "Tool outputs returned. Generating grounded final response.")
-        second = await _client.chat.completions.create(model=model_name, messages=followup_messages, temperature=0.2)
+        second = await client.chat.completions.create(model=model_name, messages=followup_messages, temperature=0.2)
         content = second.choices[0].message.content or content or "Tool call completed."
     else:
         _log_step(processing_logs, "Synthesize answer", "Responded directly from conversation memory and grounded context.")
@@ -561,8 +550,9 @@ async def _run_chat_completion(
     return content, tool_results, processing_logs
 
 
-async def _stream_llm_content(messages: list[dict], model_name: str):
-    stream = await _client.chat.completions.create(
+async def _stream_llm_content(messages: list[dict], model_name: str, user_id: str):
+    client, _runtime = await _build_client(user_id)
+    stream = await client.chat.completions.create(
         model=model_name,
         messages=messages,
         temperature=0.2,
@@ -721,6 +711,7 @@ async def send_session_message(session_id: str, request: Request, body: ChatMess
     )
     citations = _extract_citations_from_tool_results(tool_results)
     follow_up_questions = await _generate_follow_up_questions(
+        user_id=user_id,
         mode=mode,
         model_name=model_name,
         user_message=body.content.strip(),
@@ -789,7 +780,8 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
         _log_step(processing_logs, "Invoke model", f"Calling {model_name} with {len(tools_payload)} available tool definitions.")
         yield _sse_event("log", processing_logs[-1])
 
-        response = await _client.chat.completions.create(
+        client, _runtime = await _build_client(user_id)
+        response = await client.chat.completions.create(
             model=model_name,
             messages=messages,
             tools=tools_payload,
@@ -825,18 +817,19 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
                 followup_messages.append({"role": "tool", "tool_call_id": assistant_tool_calls[idx]["id"], "content": json.dumps(item["result"], default=_json_default)})
             _log_step(processing_logs, "Synthesize answer", "Tool outputs returned. Streaming grounded final response.")
             yield _sse_event("log", processing_logs[-1])
-            async for delta, collected in _stream_llm_content(followup_messages, model_name):
+            async for delta, collected in _stream_llm_content(followup_messages, model_name, user_id):
                 final_content = collected
                 yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
         else:
             _log_step(processing_logs, "Synthesize answer", "Streaming response from conversation memory and grounded context.")
             yield _sse_event("log", processing_logs[-1])
-            async for delta, collected in _stream_llm_content(messages, model_name):
+            async for delta, collected in _stream_llm_content(messages, model_name, user_id):
                 final_content = collected
                 yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
 
         citations = _extract_citations_from_tool_results(tool_results)
         follow_up_questions = await _generate_follow_up_questions(
+            user_id=user_id,
             mode=mode,
             model_name=model_name,
             user_message=user_message,

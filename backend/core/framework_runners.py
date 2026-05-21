@@ -14,6 +14,7 @@ from langgraph.prebuilt import create_react_agent
 
 from a2a.agent_communication import dispatch_remote_agent
 from config import settings
+from core.runtime_settings import reset_current_runtime_user_id, resolve_llm_runtime, set_current_runtime_user_id
 from mcp_tools.tool_server import TOOL_REGISTRY
 
 logger = structlog.get_logger(__name__)
@@ -317,11 +318,11 @@ def _extract_final_message(messages: list[BaseMessage]) -> str:
     return ""
 
 
-def _make_langchain_llm(model_name: str) -> ChatOpenAI:
+def _make_langchain_llm(model_name: str, api_key: str, base_url: str) -> ChatOpenAI:
     return ChatOpenAI(
         model=model_name,
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL,
+        api_key=api_key,
+        base_url=base_url,
         temperature=0.2,
         max_retries=2,
         stream_usage=True,
@@ -379,7 +380,7 @@ def _build_langchain_tools(
     async def serpapi_search(query: str, num: int = 5, location: str | None = None) -> str:
         return json.dumps(await TOOL_REGISTRY["serpapi_search"](query=query, num=num, location=location), default=str)
 
-    async def official_docs_search(provider: str, query: str, max_results: int = 5) -> str:
+    async def official_docs_search(query: str, provider: str = "all", max_results: int = 5) -> str:
         return json.dumps(await TOOL_REGISTRY["official_docs_search"](provider=provider, query=query, max_results=max_results), default=str)
 
     async def java_docs_search(query: str, max_results: int = 5) -> str:
@@ -480,12 +481,14 @@ async def _run_langgraph(
     agent_name: str,
     system_prompt: str,
     model_name: str,
+    api_key: str,
+    base_url: str,
     enabled_tools: list[str],
     user_message: str,
     workflow_run_id: str,
     selected_policy_ids: list[str],
 ) -> dict:
-    llm = _make_langchain_llm(model_name)
+    llm = _make_langchain_llm(model_name, api_key, base_url)
     tools = _build_langchain_tools(enabled_tools, workflow_run_id, agent_name, selected_policy_ids)
     runner = create_react_agent(model=llm, tools=tools, prompt=system_prompt or None, name=_safe_message_name(agent_name))
     result = await runner.ainvoke({"messages": [HumanMessage(content=user_message)]})
@@ -504,12 +507,14 @@ async def _run_langchain(
     agent_name: str,
     system_prompt: str,
     model_name: str,
+    api_key: str,
+    base_url: str,
     enabled_tools: list[str],
     user_message: str,
     workflow_run_id: str,
     selected_policy_ids: list[str],
 ) -> dict:
-    llm = _make_langchain_llm(model_name)
+    llm = _make_langchain_llm(model_name, api_key, base_url)
     tools = _build_langchain_tools(enabled_tools, workflow_run_id, agent_name, selected_policy_ids)
     runner = create_agent(model=llm, tools=tools, system_prompt=system_prompt or None, name=_safe_message_name(agent_name))
     result = await runner.ainvoke({"messages": [{"role": "user", "content": user_message}]})
@@ -528,6 +533,8 @@ async def _run_crewai(
     agent_name: str,
     system_prompt: str,
     model_name: str,
+    api_key: str,
+    base_url: str,
     enabled_tools: list[str],
     user_message: str,
     workflow_run_id: str,
@@ -545,8 +552,8 @@ async def _run_crewai(
 
     llm = LLM(
         model=f"openai/{model_name}",
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL,
+        api_key=api_key,
+        base_url=base_url,
         temperature=0.2,
         max_retries=2,
     )
@@ -581,6 +588,8 @@ async def _run_agno(
     agent_name: str,
     system_prompt: str,
     model_name: str,
+    api_key: str,
+    base_url: str,
     enabled_tools: list[str],
     user_message: str,
     workflow_run_id: str,
@@ -596,7 +605,7 @@ async def _run_agno(
     base_tools = _build_langchain_tools(enabled_tools, workflow_run_id, agent_name, selected_policy_ids)
     agno_tools = [_make_agno_tool(base_tool, tool) for base_tool in base_tools]
 
-    model = OpenAIChat(id=model_name, api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL)
+    model = OpenAIChat(id=model_name, api_key=api_key, base_url=base_url)
     agent = Agent(
         name=agent_name,
         model=model,
@@ -639,7 +648,10 @@ async def run_framework_agent(
 ) -> dict:
     agent_name = agent_config["name"]
     framework = (agent_config.get("framework") or "langgraph").lower()
-    model_name = agent_config.get("model_name") or settings.LLM_MODEL
+    owner_user_id = agent_config.get("owner_user_id") or (input_data.get("original_input") or {}).get("owner_user_id")
+    runtime = await resolve_llm_runtime(owner_user_id)
+    runtime_token = set_current_runtime_user_id(owner_user_id)
+    model_name = agent_config.get("model_name") or runtime["default_model"] or settings.LLM_MODEL
     enabled_tools = agent_config.get("tools", []) or []
     system_prompt = agent_config.get("system_prompt", "")
     selected_policy_ids = (input_data.get("original_input") or {}).get("policy_ids", [])
@@ -680,13 +692,13 @@ async def run_framework_agent(
             }
         if framework == "langchain":
             raw = await asyncio.wait_for(
-                _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                _run_langchain(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                 timeout=step_timeout,
             )
         elif framework == "crewai":
             try:
                 raw = await asyncio.wait_for(
-                    _run_crewai(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    _run_crewai(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                     timeout=step_timeout,
                 )
             except Exception as exc:
@@ -694,13 +706,13 @@ async def run_framework_agent(
                     raise
                 logger.warning("agent.invoke.crewai_fallback", agent_name=agent_name, error=str(exc))
                 raw = await asyncio.wait_for(
-                    _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    _run_langchain(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                     timeout=step_timeout,
                 )
         elif framework == "agno":
             try:
                 raw = await asyncio.wait_for(
-                    _run_agno(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    _run_agno(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                     timeout=step_timeout,
                 )
             except Exception as exc:
@@ -708,12 +720,12 @@ async def run_framework_agent(
                     raise
                 logger.warning("agent.invoke.agno_fallback", agent_name=agent_name, error=str(exc))
                 raw = await asyncio.wait_for(
-                    _run_langchain(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                    _run_langchain(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                     timeout=step_timeout,
                 )
         else:
             raw = await asyncio.wait_for(
-                _run_langgraph(agent_name, system_prompt, model_name, enabled_tools, user_message, workflow_run_id, selected_policy_ids),
+                _run_langgraph(agent_name, system_prompt, model_name, runtime["api_key"], runtime["base_url"], enabled_tools, user_message, workflow_run_id, selected_policy_ids),
                 timeout=step_timeout,
             )
 
@@ -761,3 +773,5 @@ async def run_framework_agent(
             "status": "failed",
             "error": str(exc),
         }
+    finally:
+        reset_current_runtime_user_id(runtime_token)

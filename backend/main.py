@@ -27,6 +27,7 @@ from api.project_router import router as project_router
 from api.admin_router import router as admin_router
 from api.tool_chat_router import router as tool_chat_router
 from api.a2a_router import router as a2a_router
+from api.settings_router import router as settings_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -85,6 +86,7 @@ app.include_router(project_router, prefix="/api/projects", tags=["Projects"])
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 app.include_router(tool_chat_router, prefix="/api/tool-chat", tags=["Tool Chat"])
 app.include_router(a2a_router, prefix="/api/a2a", tags=["A2A"])
+app.include_router(settings_router, prefix="/api/settings", tags=["Settings"])
 
 
 # Mount FastApiMCP — exposes /mcp endpoint with all registered tools

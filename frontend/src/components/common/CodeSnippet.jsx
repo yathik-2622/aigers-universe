@@ -75,9 +75,10 @@ function renderLine(line, idx) {
   )
 }
 
-export default function CodeSnippet({ code }) {
+export default function CodeSnippet({ code, language = '' }) {
   return (
-    <div className="rounded-[22px] border border-white/10 bg-[#0a1020] px-4 py-4 font-mono text-[12px] leading-6 text-[#d6deeb] overflow-auto">
+    <div className="overflow-auto rounded-[22px] border border-white/10 bg-[#0a1020] px-4 py-4 font-mono text-[12px] leading-6 text-[#d6deeb]">
+      {language ? <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-[#7f8da3]">{language}</div> : null}
       {(code || '').split('\n').map(renderLine)}
     </div>
   )

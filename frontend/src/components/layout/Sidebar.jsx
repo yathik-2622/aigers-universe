@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Briefcase, ChevronLeft, ChevronRight, Cpu, Hexagon, LayoutDashboard, LogOut, ShieldCheck, Store, UserCog, Workflow, Wrench } from 'lucide-react'
+import { Activity, Briefcase, ChevronLeft, ChevronRight, Cpu, Hexagon, LayoutDashboard, LogOut, Settings, ShieldCheck, Store, UserCog, Workflow, Wrench } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const STORAGE_KEY = 'aigers.sidebar.collapsed'
@@ -23,6 +23,7 @@ export default function Sidebar() {
       { to: '/agents', label: 'Agents', icon: Cpu, id: 'agents' },
       { to: '/builder', label: 'Workflow Builder', icon: Workflow, id: 'builder' },
       { to: '/tools-chat', label: 'AIger Copilot', icon: Wrench, id: 'tools-chat' },
+      { to: '/settings', label: 'Settings', icon: Settings, id: 'settings' },
       { to: '/hitl', label: 'HITL Approvals', icon: ShieldCheck, id: 'hitl' },
       { to: '/observability', label: 'Observability', icon: Activity, id: 'observability' },
     ]
@@ -31,7 +32,7 @@ export default function Sidebar() {
   }, [user?.role])
 
   return (
-    <aside data-testid="sidebar" data-collapsed={collapsed} className={`h-screen shrink-0 border-r border-white/10 bg-[linear-gradient(180deg,rgba(16,20,36,0.98),rgba(8,10,20,0.94))] backdrop-blur-xl flex flex-col overflow-hidden relative z-10 transition-[width] duration-200 ease-out ${collapsed ? 'w-[72px]' : 'w-64'}`}>
+    <aside data-testid="sidebar" data-collapsed={collapsed} className={`h-screen shrink-0 border-r border-line bg-panel/95 backdrop-blur-xl flex flex-col overflow-hidden relative z-10 transition-[width] duration-200 ease-out ${collapsed ? 'w-[72px]' : 'w-64'}`}>
       <div className={`pt-6 pb-7 ${collapsed ? 'px-3' : 'px-5'}`}>
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'}`}>
           <div className="relative w-9 h-9 flex items-center justify-center" data-testid="brand-logo">
@@ -54,7 +55,7 @@ export default function Sidebar() {
             to={to}
             data-testid={`nav-${id}`}
             title={collapsed ? label : undefined}
-            className={({ isActive }) => `group flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-2xl text-sm transition-all ${isActive ? 'bg-[linear-gradient(120deg,rgba(0,240,255,0.16),rgba(138,92,246,0.16))] text-ink border border-accent/30 shadow-[0_10px_30px_rgba(0,240,255,0.08)]' : 'text-muted hover:text-ink hover:bg-white/5 border border-transparent'}`}
+            className={({ isActive }) => `group flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-2xl text-sm transition-all ${isActive ? 'bg-accent/12 text-ink border border-accent/30 shadow-[0_10px_30px_rgba(0,240,255,0.08)]' : 'text-muted hover:text-ink hover:bg-white/5 border border-transparent'}`}
           >
             <Icon size={16} strokeWidth={1.75} />
             {!collapsed && <span className="font-medium tracking-tight">{label}</span>}
@@ -67,7 +68,7 @@ export default function Sidebar() {
       </button>
 
       {!collapsed && (
-        <div className="m-3 p-3 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] text-[11px] text-muted leading-relaxed shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
+        <div className="m-3 rounded-[22px] border border-white/10 bg-white/[0.05] p-3 text-[11px] text-muted leading-relaxed shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
           <div className="text-[10px] uppercase tracking-[0.22em] text-muted mb-1.5">{user?.role === 'admin' ? 'Control access' : 'Workspace access'}</div>
           <div className="text-ink font-medium truncate">{user?.display_name || 'Workspace user'}</div>
           <div className="truncate">{user?.email || ''}</div>

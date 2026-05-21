@@ -1,3 +1,4 @@
+
 """
 MCP Tool Server — built with FastMCP.
 Defines 5 generic, domain-agnostic platform tools available to all registered agents.
@@ -14,6 +15,7 @@ from fastmcp import FastMCP
 
 from a2a.agent_communication import dispatch_remote_agent, fetch_remote_agent_card
 from config import settings
+from core.runtime_settings import resolve_external_key
 from db.mongo_client import get_db
 from vectorstore.faiss_store import search_similar, add_document  # noqa: F401  (add_document used elsewhere)
 from core.llm_router import chat_completion
@@ -32,6 +34,15 @@ OFFICIAL_DOCS_PROVIDERS = {
     "react": {"label": "React", "domains": ["react.dev", "legacy.reactjs.org"]},
     "nextjs": {"label": "Next.js", "domains": ["nextjs.org"]},
     "streamlit": {"label": "Streamlit", "domains": ["docs.streamlit.io", "streamlit.io"]},
+    "fastapi": {"label": "FastAPI", "domains": ["fastapi.tiangolo.com"]},
+    "postgresql": {"label": "PostgreSQL", "domains": ["postgresql.org", "www.postgresql.org"]},
+    "mysql": {"label": "MySQL", "domains": ["dev.mysql.com"]},
+    "mongodb": {"label": "MongoDB", "domains": ["www.mongodb.com", "mongodb.com"]},
+    "docker": {"label": "Docker", "domains": ["docs.docker.com"]},
+    "kubernetes": {"label": "Kubernetes", "domains": ["kubernetes.io"]},
+    "aws": {"label": "AWS", "domains": ["docs.aws.amazon.com", "aws.amazon.com"]},
+    "azure": {"label": "Azure", "domains": ["learn.microsoft.com", "azure.microsoft.com"]},
+    "gcp": {"label": "Google Cloud", "domains": ["cloud.google.com"]},
 }
 
 
@@ -82,7 +93,7 @@ async def get_tool_health(tool_name: str) -> dict:
             return {"name": tool_name, "status": "degraded", "error": str(exc), "kind": "web_probe", "blocking": False}
 
     if tool_name == "webpage_fetch":
-        result = await _check_http_json("https://example.com")
+        result = await _check_http_json("https://www.python.org")
         status = result.get("status", "unhealthy")
         return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "web_probe", "blocking": False}
 
@@ -95,16 +106,16 @@ async def get_tool_health(tool_name: str) -> dict:
         return {"name": tool_name, **result, "status": "healthy" if status == "healthy" else "degraded", "kind": "free_api_probe", "blocking": False}
 
     if tool_name == "openweather_current":
-        configured = bool(settings.OPENWEATHER_API_KEY.strip())
+        configured = bool(await resolve_external_key("openweather_api_key"))
         return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
 
     if tool_name == "serpapi_search":
-        configured = bool(settings.SERPAPI_KEY.strip())
+        configured = bool(await resolve_external_key("serpapi_key"))
         return {"name": tool_name, "status": "healthy" if configured else "unhealthy", "kind": "configured_api", "checked_live": False, "configured": configured, "blocking": not configured}
 
     if tool_name in {"official_docs_search", "java_docs_search", "python_docs_search", "spring_docs_search", "dotnet_docs_search"}:
         provider = {
-            "official_docs_search": "java",
+            "official_docs_search": "all",
             "java_docs_search": "java",
             "python_docs_search": "python",
             "spring_docs_search": "spring",
@@ -162,25 +173,29 @@ async def knowledge_base_search_impl(query: str, top_k: int = 5) -> dict:
 
 async def document_store_impl(action: str, collection: str, data: dict | None = None, query: dict | None = None, limit: int = 50) -> dict:
     """Generic MongoDB CRUD for agent-owned structured data."""
-    logger.info("tool.document_store.called", action=action, collection=collection)
+    normalized_action = (action or "").strip().lower()
+    if normalized_action == "insert":
+        normalized_action = "store"
+
+    logger.info("tool.document_store.called", action=normalized_action, collection=collection)
     db = get_db()
     normalized_collection = (collection or "").strip().lower()
     if normalized_collection in {"documents", "workspace_documents", "uploaded_documents"}:
-        if action != "retrieve":
+        if normalized_action != "retrieve":
             raise ValueError("Documents collection supports retrieve action only")
         docs = await db.documents.find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
         return {"success": True, "data": docs, "count": len(docs), "collection": "documents"}
 
     safe_collection = f"agent_data_{collection}"
 
-    if action == "store":
+    if normalized_action == "store":
         if not data:
             raise ValueError("'data' field is required when action='store'")
         doc = {**data, "_doc_id": str(uuid.uuid4()), "_stored_at": datetime.datetime.utcnow().isoformat()}
         await db[safe_collection].insert_one(doc)
         return {"success": True, "id": doc["_doc_id"]}
 
-    if action == "retrieve":
+    if normalized_action == "retrieve":
         docs = await db[safe_collection].find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
         return {"success": True, "data": docs, "count": len(docs)}
 
@@ -371,7 +386,8 @@ async def weather_current_impl(latitude: float, longitude: float, timezone: str 
 
 async def openweather_current_impl(latitude: float, longitude: float, units: str = "metric") -> dict:
     """Fetch current weather from OpenWeather using API key."""
-    if not settings.OPENWEATHER_API_KEY.strip():
+    api_key = await resolve_external_key("openweather_api_key")
+    if not api_key:
         raise ValueError("OPENWEATHER_API_KEY is not configured")
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         response = await client.get(
@@ -379,7 +395,7 @@ async def openweather_current_impl(latitude: float, longitude: float, units: str
             params={
                 "lat": latitude,
                 "lon": longitude,
-                "appid": settings.OPENWEATHER_API_KEY,
+                "appid": api_key,
                 "units": units,
             },
         )
@@ -390,12 +406,13 @@ async def openweather_current_impl(latitude: float, longitude: float, units: str
 
 async def serpapi_search_impl(query: str, num: int = 5, location: str | None = None) -> dict:
     """Fetch live Google-style search results through SerpAPI."""
-    if not settings.SERPAPI_KEY.strip():
+    api_key = await resolve_external_key("serpapi_key")
+    if not api_key:
         raise ValueError("SERPAPI_KEY is not configured")
     params = {
         "engine": "google",
         "q": query,
-        "api_key": settings.SERPAPI_KEY,
+        "api_key": api_key,
         "num": max(1, min(num, 10)),
     }
     if location:
@@ -432,11 +449,17 @@ def _decode_duckduckgo_href(href: str) -> str:
     return unquote(match.group(1)) if match else href
 
 
-async def official_docs_search_impl(provider: str, query: str, max_results: int = 5, fetch_excerpts: bool | None = None) -> dict:
+async def official_docs_search_impl(provider: str = "all", query: str = "", max_results: int = 5, fetch_excerpts: bool | None = None) -> dict:
     provider_key = (provider or "").strip().lower()
-    if provider_key not in OFFICIAL_DOCS_PROVIDERS:
+    if provider_key not in OFFICIAL_DOCS_PROVIDERS and provider_key not in {"all", "auto", "*"}:
         raise ValueError(f"Unsupported provider '{provider}'. Must be one of {sorted(OFFICIAL_DOCS_PROVIDERS)}")
-    config = OFFICIAL_DOCS_PROVIDERS[provider_key]
+    if provider_key in {"all", "auto", "*"}:
+        config = {
+            "label": "All Official Docs",
+            "domains": [domain for item in OFFICIAL_DOCS_PROVIDERS.values() for domain in item["domains"]],
+        }
+    else:
+        config = OFFICIAL_DOCS_PROVIDERS[provider_key]
     max_results = max(1, min(max_results, settings.OFFICIAL_DOCS_MAX_RESULTS))
     fetch_excerpts = settings.OFFICIAL_DOCS_FETCH_EXCERPTS if fetch_excerpts is None else fetch_excerpts
     search_query = " OR ".join([f"site:{domain}" for domain in config["domains"]]) + f" {query}"
@@ -638,8 +661,8 @@ async def policy_library_search(query: str, policy_ids: list[str] | None = None,
 
 
 @mcp.tool
-async def official_docs_search(provider: str, query: str, max_results: int = 5) -> dict:
-    """Search official documentation sources for languages and frameworks."""
+async def official_docs_search(provider: str = "all", query: str = "", max_results: int = 5) -> dict:
+    """Search official documentation sources across supported languages, frameworks, clouds, and databases."""
     return await official_docs_search_impl(provider=provider, query=query, max_results=max_results)
 
 
@@ -732,7 +755,7 @@ TOOL_METADATA = {
     "weather_current": {"description": "Fetch current weather from Open-Meteo using latitude and longitude.", "category": "realtime"},
     "openweather_current": {"description": "Fetch current weather from OpenWeather using a configured API key.", "category": "realtime"},
     "serpapi_search": {"description": "Fetch live search-engine results through SerpAPI using a configured API key.", "category": "web"},
-    "official_docs_search": {"description": "Search official docs for Java, Python, Spring, and .NET.", "category": "research"},
+    "official_docs_search": {"description": "Search official docs across supported languages, frameworks, clouds, and data platforms.", "category": "research"},
     "java_docs_search": {"description": "Search Oracle Java documentation.", "category": "research"},
     "python_docs_search": {"description": "Search official Python documentation.", "category": "research"},
     "spring_docs_search": {"description": "Search official Spring documentation.", "category": "research"},
@@ -741,3 +764,4 @@ TOOL_METADATA = {
     "remote_agent_dispatch": {"description": "Dispatch work to a remote A2A agent over HTTP.", "category": "a2a"},
     "trigger_hitl": {"description": "Pause a workflow for human approval.", "category": "control"},
 }
+

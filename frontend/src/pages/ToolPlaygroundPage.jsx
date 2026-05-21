@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import CustomSelect from '../components/common/CustomSelect.jsx'
+import CodeSnippet from '../components/common/CodeSnippet.jsx'
 import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
 import { listModels, listTools } from '../api/platform.js'
@@ -33,6 +34,7 @@ import {
   updateChatSession,
   uploadChatFiles,
 } from '../api/toolChat.js'
+import { normalizeModelOptions } from '../lib/modelOptions.js'
 
 const MODES = {
   platform: {
@@ -238,7 +240,10 @@ function ToolActivity({ items }) {
           {items.map((item, index) => (
             <div key={`${item.tool}-${index}`} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
               <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{item.tool}</div>
-              <div className="mt-1 break-all text-xs leading-6 text-[#aab6cd]">{JSON.stringify(item.args || {})}</div>
+              <div className="mt-3 space-y-3">
+                <CodeSnippet code={JSON.stringify(item.args || {}, null, 2)} language="tool args" />
+                <CodeSnippet code={JSON.stringify(item.result || {}, null, 2)} language="tool result" />
+              </div>
             </div>
           ))}
         </div>
@@ -330,11 +335,11 @@ export default function ToolPlaygroundPage() {
     Promise.all([listTools(), listModels(), listChatSessions()])
       .then(async ([toolData, modelData, sessionData]) => {
         if (!mounted) return
-        const modelItems = modelData.models || []
+        const modelItems = normalizeModelOptions(modelData.models || [])
         const sessionItems = sessionData.sessions || []
         setTools(toolData.items || [])
         setModels(modelItems)
-        setDraftModel(modelItems[0] || 'gpt-4o')
+        setDraftModel(modelItems[0]?.value || 'gpt-4o')
         setSessions(sessionItems)
         const firstId = sessionItems[0]?.session_id || ''
         if (firstId) {
@@ -344,7 +349,7 @@ export default function ToolPlaygroundPage() {
           setSession(detail.session)
           prevMessageCountRef.current = detail.session.messages?.length || 0
           setDraftMode(detail.session.mode || 'platform')
-          setDraftModel(detail.session.model_name || modelItems[0] || 'gpt-4o')
+          setDraftModel(detail.session.model_name || modelItems[0]?.value || 'gpt-4o')
           setDraftTool(detail.session.preferred_tool ?? '')
         }
       })
@@ -373,7 +378,7 @@ export default function ToolPlaygroundPage() {
   }, [input])
 
   const currentMode = session?.mode || draftMode
-  const currentModel = session?.model_name || draftModel || models[0] || 'gpt-4o'
+  const currentModel = session?.model_name || draftModel || models[0]?.value || 'gpt-4o'
   const currentTool = session?.preferred_tool ?? draftTool ?? ''
   const placeholder = MODES[currentMode]?.placeholder || MODES.platform.placeholder
   const starterPrompts = MODES[currentMode]?.starters || MODES.platform.starters
@@ -393,9 +398,7 @@ export default function ToolPlaygroundPage() {
     Object.entries(MODES).map(([value, meta]) => ({ value, label: meta.label }))
   ), [])
 
-  const modelOptions = useMemo(() => (
-    (models || []).map((model) => ({ value: model, label: model }))
-  ), [models])
+  const modelOptions = useMemo(() => models || [], [models])
 
   const toolOptions = useMemo(() => ([
     { value: '', label: 'Auto tool', meta: 'system' },
@@ -417,7 +420,7 @@ export default function ToolPlaygroundPage() {
       const created = await createChatSession({
         title: 'New AIger chat',
         mode: modeName,
-        model_name: draftModel || models[0] || 'gpt-4o',
+        model_name: draftModel || models[0]?.value || 'gpt-4o',
         preferred_tool: draftTool || null,
         enabled_tools: tools.map((tool) => tool.name),
       })
@@ -464,7 +467,7 @@ export default function ToolPlaygroundPage() {
       setSession(detail.session)
       prevMessageCountRef.current = detail.session.messages?.length || 0
       setDraftMode(detail.session.mode || 'platform')
-      setDraftModel(detail.session.model_name || models[0] || 'gpt-4o')
+      setDraftModel(detail.session.model_name || models[0]?.value || 'gpt-4o')
       setDraftTool(detail.session.preferred_tool ?? '')
       setRenamingSessionId('')
     } catch (err) {
@@ -485,7 +488,7 @@ export default function ToolPlaygroundPage() {
           setSession(detail.session)
           prevMessageCountRef.current = detail.session.messages?.length || 0
           setDraftMode(detail.session.mode || 'platform')
-          setDraftModel(detail.session.model_name || models[0] || 'gpt-4o')
+          setDraftModel(detail.session.model_name || models[0]?.value || 'gpt-4o')
           setDraftTool(detail.session.preferred_tool ?? '')
         } else {
           setSession(null)

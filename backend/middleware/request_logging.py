@@ -9,6 +9,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from core.request_context import get_optional_user_id
+from core.runtime_settings import reset_current_runtime_user_id, set_current_runtime_user_id
+
 logger = structlog.get_logger(__name__)
 
 
@@ -24,6 +27,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
+        runtime_token = set_current_runtime_user_id(get_optional_user_id(request))
 
         logger.info(
             "http.request.received",
@@ -46,5 +50,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code if response else 500,
                 duration_ms=duration_ms,
             )
+            reset_current_runtime_user_id(runtime_token)
             if response is not None:
                 response.headers["X-Request-ID"] = request_id
