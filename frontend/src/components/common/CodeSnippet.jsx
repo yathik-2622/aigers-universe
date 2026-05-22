@@ -55,15 +55,17 @@ function tokenClass(type) {
   if (type === 'keyword') return 'text-[#ff7b72]'
   if (type === 'string') return 'text-[#7ee787]'
   if (type === 'number') return 'text-[#79c0ff]'
-  if (type === 'comment') return 'text-[#7f8da3]'
+  if (type === 'comment') return 'text-muted'
   return ''
 }
+
 
 function renderLine(line, idx) {
   const tokens = tokenizeLine(line)
   return (
     <div key={idx} className="grid grid-cols-[42px_1fr] gap-3">
-      <div className="text-right text-[#5d6b82] select-none">{idx + 1}</div>
+      <div className="text-right text-muted select-none">{idx + 1}</div>
+
       <div className="whitespace-pre-wrap break-words">
         {tokens.length === 0 ? '\u00a0' : tokens.map((token, tokenIdx) => (
           <span key={`${idx}-${tokenIdx}`} className={tokenClass(token.type)}>
@@ -77,8 +79,9 @@ function renderLine(line, idx) {
 
 export default function CodeSnippet({ code, language = '' }) {
   return (
-    <div className="overflow-auto rounded-[22px] border border-white/10 bg-[#0a1020] px-4 py-4 font-mono text-[12px] leading-6 text-[#d6deeb]">
-      {language ? <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-[#7f8da3]">{language}</div> : null}
+    <div className="overflow-auto rounded-[22px] border border-line bg-panel px-4 py-4 font-mono text-[12px] leading-6 text-ink">
+      {language ? <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-muted">{language}</div> : null}
+
       {(code || '').split('\n').map(renderLine)}
     </div>
   )

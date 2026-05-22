@@ -16,17 +16,30 @@ function applyTheme(theme) {
   const next = theme === 'light' ? 'light' : 'dark'
   document.documentElement.dataset.theme = next
   document.documentElement.style.colorScheme = next
-  try { localStorage.setItem('aigers.theme', next) } catch {}
+
+  try {
+    localStorage.setItem('aigers.theme', next)
+  } catch {}
+
+  // Keep Tailwind class strategy consistent if used elsewhere
+  try {
+    document.body.classList.remove('dark', 'light')
+    document.body.classList.add(next === 'dark' ? 'dark' : 'light')
+  } catch {}
 }
 
 export function SettingsProvider({ children }) {
   const { ready, token } = useAuth()
+
   const [settings, setSettings] = useState(() => {
-    const cachedTheme = (() => {
-      try { return localStorage.getItem('aigers.theme') || 'dark' } catch { return 'dark' }
-    })()
+    let cachedTheme = 'dark'
+    try {
+      cachedTheme = localStorage.getItem('aigers.theme') || 'dark'
+    } catch {}
+
     return { ...DEFAULT_SETTINGS, theme: cachedTheme }
   })
+
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -35,8 +48,10 @@ export function SettingsProvider({ children }) {
 
   useEffect(() => {
     if (!ready || !token) return
+
     let mounted = true
     setLoading(true)
+
     getSettings()
       .then((data) => {
         if (!mounted) return
@@ -46,12 +61,19 @@ export function SettingsProvider({ children }) {
       .finally(() => {
         if (mounted) setLoading(false)
       })
-    return () => { mounted = false }
+
+    return () => {
+      mounted = false
+    }
   }, [ready, token])
 
   const updateSettings = async (payload) => {
     const data = await updateSettingsApi(payload)
-    const next = { ...DEFAULT_SETTINGS, ...(data.settings || {}), theme: payload.theme || data.settings?.theme || settings.theme }
+    const next = {
+      ...DEFAULT_SETTINGS,
+      ...(data.settings || {}),
+      theme: payload.theme || data.settings?.theme || settings.theme,
+    }
     setSettings((prev) => ({ ...prev, ...next }))
     return data
   }
@@ -68,3 +90,4 @@ export function useSettings() {
   if (!value) throw new Error('useSettings must be used within SettingsProvider')
   return value
 }
+
