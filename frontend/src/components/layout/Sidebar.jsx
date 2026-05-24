@@ -1,15 +1,13 @@
 import React, { useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Activity, Briefcase, Cpu, Database, Hexagon, LayoutDashboard, LogOut, Orbit, Settings, ShieldCheck, Store, UserCog, Workflow, Wrench } from 'lucide-react'
-import ModalShell from '../common/ModalShell.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
-import SettingsPage from '../../pages/SettingsPage.jsx'
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const [hovered, setHovered] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const expanded = hovered
+
 
   const nav = useMemo(() => {
     const items = [
@@ -19,7 +17,7 @@ export default function Sidebar() {
       { to: '/agents', label: 'Agents', icon: Cpu, id: 'agents' },
       { to: '/builder', label: 'Workflow Builder', icon: Workflow, id: 'builder' },
       { to: '/tools-chat', label: 'AIger Copilot', icon: Wrench, id: 'tools-chat' },
-      { to: '/knowledge-base', label: 'Knowledge Base', icon: Database, id: 'knowledge-base' },
+      { to: '/knowledge-base', label: 'Knowledge Ingest', icon: Database, id: 'knowledge-base' },
       { to: '/knowledge-graph', label: 'Knowledge Graph', icon: Orbit, id: 'knowledge-graph' },
       { to: '/hitl', label: 'HITL Approvals', icon: ShieldCheck, id: 'hitl' },
       { to: '/observability', label: 'Observability', icon: Activity, id: 'observability' },
@@ -72,9 +70,12 @@ export default function Sidebar() {
             <div className="text-[10px] uppercase tracking-[0.22em] text-muted mb-1.5">{user?.role === 'admin' ? 'Admin access' : 'Signed in'}</div>
             <div className="text-sm text-ink font-medium truncate">{user?.display_name || 'Workspace user'}</div>
             <div className="mt-0.5 text-[11px] text-muted truncate">{user?.email || ''}</div>
-            <button onClick={() => setSettingsOpen(true)} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-[12px] text-muted hover:text-ink">
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => `mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-[12px] text-muted hover:text-ink ${isActive ? 'text-ink border-accent/40 bg-accent/10' : ''}`}
+            >
               <Settings size={13} /> Settings
-            </button>
+            </NavLink>
             <button onClick={logout} className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-panel/70 px-3 py-2 text-[12px] text-muted hover:text-ink">
               <LogOut size={13} /> Logout
             </button>
@@ -84,9 +85,9 @@ export default function Sidebar() {
             <div className="h-8 w-8 rounded-full bg-white/[0.08] flex items-center justify-center text-xs font-semibold text-ink">
               {(user?.display_name || user?.email || 'A').slice(0, 1).toUpperCase()}
             </div>
-            <button onClick={() => setSettingsOpen(true)} title="Settings" className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.05] p-2 text-muted hover:text-ink">
+            <NavLink to="/settings" title="Settings" className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.05] p-2 text-muted hover:text-ink" >
               <Settings size={14} />
-            </button>
+            </NavLink>
             <button onClick={logout} title="Logout" className="inline-flex items-center justify-center rounded-full border border-white/10 bg-panel/70 p-2 text-muted hover:text-ink">
               <LogOut size={14} />
             </button>
@@ -100,15 +101,7 @@ export default function Sidebar() {
         </div>
       )}
 
-      <ModalShell
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        title="Workspace Settings"
-        subtitle="Provider runtime, model defaults, and external tool keys."
-        width="max-w-6xl"
-      >
-        <SettingsPage />
-      </ModalShell>
+
     </aside>
   )
 }

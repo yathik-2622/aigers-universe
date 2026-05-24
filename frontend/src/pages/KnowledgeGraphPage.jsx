@@ -471,7 +471,9 @@ export default function KnowledgeGraphPage() {
           AIgers Knowledge Galaxy
         </div>
 
-        <div style={{ width: '100%', height: 'calc(100vh - 2rem)' }}>
+      <div style={{ width: '100%', height: 'calc(100vh - 2rem)', marginLeft: '0', marginRight: '0', overflow: 'hidden' }}>
+
+
           {loading ? (
             <div style={{ width: '100%', height: 'calc(100vh - 2rem)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9fb3ff', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -494,10 +496,13 @@ export default function KnowledgeGraphPage() {
           )}
         </div>
 
-        <aside style={{ position: 'absolute', right: panelOpen ? 18 : -420, top: 80, zIndex: 7000, transition: 'right .28s ease', width: 360 }}>
+        <aside style={{ position: 'absolute', right: panelOpen ? 18 : -420, top: 42, zIndex: 7000, transition: 'right .28s ease', width: 392 }}>
+
+
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderRadius: 24, background: 'rgba(4,10,22,0.82)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 90px rgba(0,0,0,0.34)', padding: 16, color: '#fff', backdropFilter: 'blur(16px)' }}>
-            <div style={{ width: '100%' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: '100%', maxHeight: 'calc(100vh - 96px)', overflowY: 'auto', paddingRight: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, position: 'sticky', top: 0, background: 'rgba(4,10,22,0.82)', backdropFilter: 'blur(16px)', zIndex: 1, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)'}}>
                 <div>
                   <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
                     {mode === 'main' ? 'Main categories' : mode === 'sub' ? `Subcategories of ${mainNodes.find((node) => node.key === selectedMainKey)?.label || selectedMainKey}` : highlightDoc ? `Chunks of ${highlightDoc}` : `Chunks ${selectedSubKey || selectedMainKey || ''}`}

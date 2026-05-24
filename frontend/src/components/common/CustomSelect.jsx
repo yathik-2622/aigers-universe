@@ -75,14 +75,25 @@ export default function CustomSelect({
                   onChange?.(option.value)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${
+                className={`group flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${
                   option.value === value
                     ? 'bg-accent/14 text-ink'
-                    : 'bg-transparent text-ink/70 hover:bg-white/[0.06]'
-                } ${option.disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+                    : 'bg-transparent text-ink/70 hover:bg-accent/12'
+                } ${option.disabled ? 'cursor-not-allowed opacity-50' : ''} ${option.hoverBgClass || ''}`}
               >
                 <span className="min-w-0 truncate">{option.label}</span>
-                {option.meta && <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">{option.meta}</span>}
+                <div className="flex min-w-0 items-center gap-3 justify-end">
+                  {option.meta && (
+                    <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">
+                      {option.meta}
+                    </span>
+                  )}
+                  {option.help && (
+                    <span className="pointer-events-none hidden group-hover:inline min-w-0 truncate text-[11px] text-ink/80">
+                      {option.help}
+                    </span>
+                  )}
+                </div>
               </button>
             ))}
           </div>

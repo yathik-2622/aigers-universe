@@ -128,13 +128,43 @@ export default function KnowledgeBasePage() {
     { value: 'failed', label: 'Failed', meta: 'retry' },
   ]
 
-  const chunkStrategyOptions = useMemo(() => (
-    Object.entries(chunkingStrategies).map(([key, value]) => ({
-      value: key,
-      label: key,
-      meta: value?.label || value?.description || 'strategy',
-    }))
-  ), [chunkingStrategies])
+  const CHUNKING_STRATEGIES_INFO = {
+    'section-aware-large': 'Large chunks that preserve sections and paragraphs (recommended for long reports).',
+    'page-based-large': 'Group multiple pages into large chunks (recommended for PDFs).',
+    'sliding-window': 'Token-based sliding window with large window size and overlap.',
+    'code-aware': 'Keep code blocks intact and split conservatively for source files.',
+    'table-first': 'Prioritize table-like chunks first then large text chunks.',
+    'markdown': 'Markdown-aware splitter that respects headings and code fences.',
+    'semantic-topic': 'Cluster document into topic-based large chunks (TF-IDF + clustering).',
+  }
+
+
+  const chunkStrategyOptions = useMemo(() => {
+    const hoverBgClassByKey = {
+      'section-aware-large': 'hover:bg-red-300/[0.12]',
+      'page-based-large': 'hover:bg-orange-300/[0.12]',
+      'sliding-window': 'hover:bg-yellow-300/[0.12]',
+      'code-aware': 'hover:bg-green-300/[0.12]',
+      'table-first': 'hover:bg-teal-300/[0.12]',
+      'markdown': 'hover:bg-blue-300/[0.12]',
+      'semantic-topic': 'hover:bg-violet-300/[0.12]',
+    }
+
+
+    return Object.entries(chunkingStrategies).map(([key, value]) => {
+      const info = CHUNKING_STRATEGIES_INFO[key]
+      return {
+        value: key,
+        label: key,
+        meta: value?.label || value?.description || 'strategy',
+        help: typeof info === 'string' ? info : (info || '') || value?.description || value?.label || '',
+        tooltip: value?.description || value?.label || (typeof info === 'string' ? info : (info?.description || info?.label || '')),
+        hoverBgClass: hoverBgClassByKey[key] || '',
+      }
+    })
+  }, [chunkingStrategies])
+
+
 
   const selectedDocuments = useMemo(
     () => documents.filter((item) => selectedDocumentIds.includes(item.document_id)),
@@ -241,17 +271,17 @@ export default function KnowledgeBasePage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-cyan-100">
-              <BookOpenText size={12} /> AIgers document control plane
+              <BookOpenText size={12} /> AIgers document control
             </div>
-            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight text-ink">Upload raw files, curate metadata, then ingest them into the AIgers vector graph.</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+            <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-ink">Upload, curate metadata, then ingest into the vector graph.</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted">
               Upload stores the source asset and base metadata in <code>aigers_documents</code>. Embed runs parsing, chunking, embeddings, and chunk persistence into <code>aigers_chunks</code>.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => load(filters)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2.5 text-xs text-muted hover:border-cyan-300/35 hover:text-ink"
+              onClick={() => load(filters)}
+            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[11px] text-muted hover:border-cyan-300/35 hover:text-ink"
           >
             <RefreshCcw size={14} /> Refresh
           </button>
@@ -309,7 +339,7 @@ export default function KnowledgeBasePage() {
                 </div>
                 <div>
                   <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-muted">Chunking</label>
-                  <CustomSelect label="Chunking strategy" value={uploadForm.chunk_strategy} onChange={(value) => setUploadForm((current) => ({ ...current, chunk_strategy: value }))} options={chunkStrategyOptions.length ? chunkStrategyOptions : [{ value: 'section-aware-large', label: 'section-aware-large', meta: 'default' }]} />
+                          <CustomSelect label="Chunking strategy" value={uploadForm.chunk_strategy} onChange={(value) => setUploadForm((current) => ({ ...current, chunk_strategy: value }))} options={chunkStrategyOptions.length ? chunkStrategyOptions : [{ value: 'section-aware-large', label: 'section-aware-large', meta: 'default' }]} disabled={ingesting} />
                 </div>
               </div>
 
@@ -317,9 +347,10 @@ export default function KnowledgeBasePage() {
                 <button onClick={handleUpload} disabled={uploading} className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:opacity-90 disabled:opacity-50">
                   <UploadCloud size={14} /> {uploading ? 'Uploading...' : `Upload ${selectedFiles.length ? `${selectedFiles.length} file(s)` : 'files'}`}
                 </button>
-                <button onClick={() => handleIngest()} disabled={ingesting || !queuedForEmbed.length} className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-medium text-emerald-100 transition hover:border-emerald-300/40 disabled:opacity-50">
+                  <button onClick={() => handleIngest()} disabled={ingesting || !queuedForEmbed.length || selectedDocumentIds.length === 0} className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-medium text-emerald-100 transition hover:border-emerald-300/40 disabled:opacity-50">
                   <Rocket size={14} /> {ingesting ? 'Embedding...' : `Embed ${queuedForEmbed.length ? queuedForEmbed.length : 'selected'}`}
                 </button>
+
               </div>
 
               {selectedFiles.length ? (
@@ -376,13 +407,17 @@ export default function KnowledgeBasePage() {
                 <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-muted">
                   {loading ? 'Syncing' : `${documents.length} loaded`}
                 </div>
-                <button onClick={() => handleIngest()} disabled={ingesting || !selectedDocumentIds.length} className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-100 disabled:opacity-50">
+                <button
+                  onClick={() => handleIngest()}
+                  disabled={ingesting || !selectedDocumentIds.length || selectedDocuments.some((d) => d.status === 'embedded')}
+                  className={`inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-100 disabled:opacity-50 ${selectedDocuments.some((d) => d.status === 'embedded') ? 'cursor-not-allowed' : ''}`}
+                >
                   <Rocket size={13} /> Embed selected
                 </button>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-3">
+            <div className="mt-4 grid gap-3 max-h-[70vh] overflow-y-auto pr-1">
               {documents.map((doc) => {
                 const selected = selectedDocumentIds.includes(doc.document_id)
                 return (
@@ -392,16 +427,79 @@ export default function KnowledgeBasePage() {
                         <input
                           type="checkbox"
                           checked={selected}
-                          onChange={() => toggleSelectedDocument(doc.document_id)}
-                          className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent"
+                          disabled={doc.status === 'embedded'}
+                          onChange={() => {
+                            if (doc.status === 'embedded') return
+                            toggleSelectedDocument(doc.document_id)
+                          }}
+                          className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-50"
                         />
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-ink">{doc.filename}</div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.14em] text-muted">
-                            <span>{doc.main_category || 'general'}</span>
-                            {doc.sub_category ? <span>/ {doc.sub_category}</span> : null}
-                            <span>•</span>
-                            <span>{doc.chunk_strategy}</span>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.14em]">
+
+                            {(() => {
+                              const main = doc.main_category || 'general'
+                              const mainHash = Array.from(String(main)).reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 360, 0)
+                              const mainBg = `hsla(${mainHash}, 80%, 55%, 0.10)`
+                              const mainBorder = `hsla(${mainHash}, 80%, 60%, 0.25)`
+                              const mainText = `hsla(${mainHash}, 90%, 85%, 0.95)`
+                              return (
+                                <span
+                                  className="inline-flex items-center rounded-full border px-3 py-1"
+                                  style={{ background: mainBg, borderColor: mainBorder, color: mainText }}
+                                >
+                                  {main}
+                                </span>
+                              )
+                            })()}
+
+                            {doc.sub_category ? (
+                              (() => {
+                                const sub = doc.sub_category
+                                const subKey = `${doc.main_category || 'general'}::${sub}`
+                                const subHash = Array.from(String(subKey)).reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 360, 0)
+                                const subBg = `hsla(${subHash}, 80%, 55%, 0.10)`
+                                const subBorder = `hsla(${subHash}, 80%, 60%, 0.25)`
+                                const subText = `hsla(${subHash}, 90%, 85%, 0.95)`
+                                return (
+                                  <span
+                                    className="inline-flex items-center rounded-full border px-3 py-1"
+                                    style={{ background: subBg, borderColor: subBorder, color: subText }}
+                                  >
+                                    {sub}
+                                  </span>
+                                )
+                              })()
+                            ) : null}
+
+                            <span className="inline-flex items-center gap-2 text-muted">
+                              <span className="opacity-70">•</span>
+                              {(() => {
+                                const strategy = doc.chunk_strategy || 'section-aware-large'
+                                const colorsByStrategy = {
+                                  'section-aware-large': { h: 0 },
+                                  'page-based-large': { h: 30 },
+                                  'sliding-window': { h: 60 },
+                                  'code-aware': { h: 120 },
+                                  'table-first': { h: 165 },
+                                  'markdown': { h: 210 },
+                                  'semantic-topic': { h: 275 },
+                                }
+                                const pick = colorsByStrategy[strategy] || { h: 250 }
+                                const bg = `hsla(${pick.h}, 85%, 55%, 0.10)`
+                                const border = `hsla(${pick.h}, 85%, 60%, 0.25)`
+                                const text = `hsla(${pick.h}, 95%, 88%, 0.95)`
+                                return (
+                                  <span
+                                    className="text-[11px] uppercase tracking-[0.14em] px-3 py-1 rounded-full border"
+                                    style={{ background: bg, borderColor: border, color: text }}
+                                  >
+                                    {strategy}
+                                  </span>
+                                )
+                              })()}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -415,21 +513,21 @@ export default function KnowledgeBasePage() {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                       <div className="grid gap-2 text-xs text-muted sm:grid-cols-4">
-                        <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                        <div className="px-0 py-0">
                           <div className="uppercase tracking-[0.16em]">Size</div>
                           <div className="mt-1 text-ink">{formatBytes(doc.file_size_bytes || 0)}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                        <div className="px-0 py-0">
                           <div className="uppercase tracking-[0.16em]">Chars</div>
                           <div className="mt-1 text-ink">{doc.text_length || 0}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                        <div className="px-0 py-0">
                           <div className="uppercase tracking-[0.16em]">Chunks</div>
                           <div className="mt-1 text-ink">{doc.chunk_count || 0}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                        <div className="px-0 py-0">
                           <div className="uppercase tracking-[0.16em]">Updated</div>
                           <div className="mt-1 text-ink">{formatTimestamp(doc.updated_at)}</div>
                         </div>
@@ -438,11 +536,12 @@ export default function KnowledgeBasePage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => handleIngest([doc.document_id])}
-                          disabled={ingesting || doc.status === 'embedding'}
-                          className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-100 disabled:opacity-50"
+                          disabled={ingesting || doc.status === 'embedding' || doc.status === 'embedded'}
+                          className={`inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-100 disabled:opacity-50 ${doc.status === 'embedded' ? 'cursor-not-allowed' : ''}`}
                         >
-                          <Rocket size={13} /> {doc.status === 'embedded' ? 'Re-embed' : 'Embed'}
+                          <Rocket size={13} /> {doc.status === 'embedded' ? 'Embedded' : 'Embed'}
                         </button>
+
                         <button
                           onClick={() => handleDelete(doc.document_id)}
                           disabled={deletingId === doc.document_id || doc.status === 'embedding'}
@@ -460,9 +559,14 @@ export default function KnowledgeBasePage() {
                     ) : null}
 
                     {doc.context_excerpt ? (
-                      <div className="mt-3 rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-muted">
-                        {doc.context_excerpt}
-                      </div>
+                      <details className="mt-3 rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-muted">
+                        <summary className="cursor-pointer select-none font-medium text-ink/90">
+                          View embedded content
+                        </summary>
+                        <div className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap">
+                          {doc.context_excerpt}
+                        </div>
+                      </details>
                     ) : null}
                   </div>
                 )

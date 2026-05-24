@@ -20,6 +20,7 @@ import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 
 function ProtectedShell() {
   const { ready, user } = useAuth()
@@ -47,6 +48,7 @@ function ProtectedShell() {
               <Route path="/observability" element={<ObservabilityPage />} />
               <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
               <Route path="/admin" element={<AdminPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>
