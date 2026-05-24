@@ -6,7 +6,7 @@ credentials.json
 *.key
 .credentials
 .crewai_runtime/
-
+backend/storage/documents/
 # Python
 __pycache__/
 *.py[cod]
