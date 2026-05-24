@@ -1,5 +1,5 @@
 import React from "react";
-import styles from "./HCKBKGComponents.module.css";
+import styles from "./AigersKGComponents.module.css";
 
 export default function HCKBSectorLegend({ legend = {}, counts = {}, onClick = () => {}, active = null }) {
   const safe = legend || {};
