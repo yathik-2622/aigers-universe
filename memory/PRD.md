@@ -9,7 +9,7 @@ gate flow with HITL approvals, and observe tokens/latency/cost in real time.
 
 ## Tech stack (locked)
 - Backend: FastAPI + Motor + MongoDB + LangGraph (InMemorySaver) + fastmcp + python-a2a + openai (Tiger Analytics gateway, gpt-4o)
-- Vector store: FAISS (faiss-cpu, persisted)
+- Vector store: MongoDB vector chunks with Atlas vector search fallback
 - Logging: structlog across every module
 - Frontend: Vite + React 18 + ReactFlow + Recharts + Tailwind (dark enterprise theme)
 - Storage: local MongoDB
@@ -20,7 +20,7 @@ gate flow with HITL approvals, and observe tokens/latency/cost in real time.
 3. **Platform Admin** — manages templates and rules
 
 ## What's implemented (as of 2026-05-17)
-- Full backend: 6 routers under `/api/*` · 5 MCP tools (semantic_search, document_store, rules_engine_check, risk_scorer, trigger_hitl) · LangGraph workflow engine with InMemorySaver and HITL interrupt/resume · A2A message bus to MongoDB · FAISS vector store · PDF/DOCX/TXT ingestion · structlog request_id middleware · FastApiMCP `/mcp` SSE endpoint
+- Full backend: 6 routers under `/api/*` · 5 MCP tools (semantic_search, document_store, rules_engine_check, risk_scorer, trigger_hitl) · LangGraph workflow engine with InMemorySaver and HITL interrupt/resume · A2A message bus to MongoDB · Mongo vector store · PDF/DOCX/TXT/image ingestion · structlog request_id middleware · FastApiMCP `/mcp` SSE endpoint
 - Full frontend: 7 pages (Dashboard, Marketplace, Agents, Builder, Run, HITL, Observability) · ReactFlow drag-drop canvas with right-side config panel · SSE-driven Workflow Run page with polling fallback · Recharts (token bar, latency bar, runs timeline) · sonner toasts · Tailwind dark enterprise theme (Geist + JetBrains Mono)
 - **Polish pass 1**: idempotent marketplace install · SSE `/api/workflows/runs/:id/stream` · dynamic workflow-name topbar via TitleContext · React Router v7 future flags
 - **Polish pass 2 (sidebar+logo+docs)**: collapsible sidebar with localStorage persistence (w-64 ↔ w-[68px]) · transparent stacked-hexagon logo (lucide-react, no solid background) · expanded USER_GUIDE.md (TOC, walkthrough, best practices, glossary, full API ref) · README.md rewritten as a local-dev VS Code quickstart with launch.json, tasks.json, smoke curls, pytest instructions, and production build steps

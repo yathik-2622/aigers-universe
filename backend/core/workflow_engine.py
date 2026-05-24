@@ -13,6 +13,7 @@ from a2a.agent_communication import get_a2a_messages, send_a2a_message
 from config import settings
 from core.agent_registry import invoke_agent_by_id
 from core.report_builder import build_run_report
+from db.collection_names import AIGERS_DOCUMENTS
 from db.mongo_client import get_db
 from db.repositories.agent_repo import AgentRepository
 from hitl import resume_signals
@@ -103,9 +104,9 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
 
     db = get_db()
     all_ids = list(dict.fromkeys([*upload_ids, *([repo_document_id] if repo_document_id else [])]))
-    docs = await db.documents.find(
+    docs = await db[AIGERS_DOCUMENTS].find(
         {"document_id": {"$in": all_ids}},
-        {"_id": 0, "document_id": 1, "filename": 1, "category": 1, "text": 1, "context_excerpt": 1, "text_length": 1, "source_meta": 1, "scope": 1},
+        {"_id": 0, "document_id": 1, "filename": 1, "main_category": 1, "sub_category": 1, "text": 1, "context_excerpt": 1, "text_length": 1, "source_meta": 1, "scope": 1},
     ).to_list(len(all_ids) or 1)
     docs_by_id = {doc["document_id"]: doc for doc in docs}
 
@@ -113,7 +114,8 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
         {
             "document_id": doc_id,
             "filename": docs_by_id[doc_id].get("filename", ""),
-            "category": docs_by_id[doc_id].get("category", ""),
+            "category": docs_by_id[doc_id].get("main_category", ""),
+            "sub_category": docs_by_id[doc_id].get("sub_category", ""),
             "scope": docs_by_id[doc_id].get("scope", "workflow_input"),
             "text_length": docs_by_id[doc_id].get("text_length", 0),
             "text_excerpt": docs_by_id[doc_id].get("context_excerpt") or _context_excerpt(docs_by_id[doc_id].get("text", "")),
@@ -534,7 +536,7 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
     total_text_chars += len(github_repo.get("text_excerpt") or "")
     all_ids = [*upload_doc_ids, *([workflow_inputs.get("repo_document_id")] if workflow_inputs.get("repo_document_id") else [])]
     if all_ids:
-        docs = await db.documents.find({"document_id": {"$in": all_ids}}, {"_id": 0, "file_size_bytes": 1}).to_list(len(all_ids))
+        docs = await db[AIGERS_DOCUMENTS].find({"document_id": {"$in": all_ids}}, {"_id": 0, "file_size_bytes": 1}).to_list(len(all_ids))
         total_file_bytes = sum(int(doc.get("file_size_bytes", 0) or 0) for doc in docs)
     if total_file_bytes > settings.WORKFLOW_INPUT_MAX_TOTAL_BYTES:
         raise ValueError(f"Workflow input total file size exceeds limit ({settings.WORKFLOW_INPUT_MAX_TOTAL_BYTES} bytes)")
@@ -542,7 +544,7 @@ async def build_and_run_workflow(workflow_id: str, input_data: dict, owner_user_
         raise ValueError(f"Workflow input text exceeds limit ({settings.WORKFLOW_INPUT_MAX_TEXT_CHARS} chars)")
     run_id = str(uuid.uuid4())
     if all_ids:
-        await db.documents.update_many(
+        await db[AIGERS_DOCUMENTS].update_many(
             {"document_id": {"$in": all_ids}},
             {
                 "$set": {

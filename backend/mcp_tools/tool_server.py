@@ -16,8 +16,9 @@ from fastmcp import FastMCP
 from a2a.agent_communication import dispatch_remote_agent, fetch_remote_agent_card
 from config import settings
 from core.runtime_settings import resolve_external_key
+from db.collection_names import AIGERS_DOCUMENTS
 from db.mongo_client import get_db
-from vectorstore.faiss_store import search_similar, add_document  # noqa: F401  (add_document used elsewhere)
+from vectorstore.mongo_vector_store import search_similar, add_document  # noqa: F401  (add_document used elsewhere)
 from core.llm_router import chat_completion
 
 logger = structlog.get_logger(__name__)
@@ -158,7 +159,7 @@ def register_all_tools() -> None:
 # without going through MCP transport. The same function bodies are exposed both ways.
 
 async def semantic_search_impl(query: str, top_k: int = 5) -> dict:
-    """Search indexed documents using FAISS semantic similarity."""
+    """Search indexed documents using Mongo-backed semantic similarity."""
     logger.info("tool.semantic_search.called", query=query[:100], top_k=top_k)
     top_k = min(max(int(top_k), 1), 20)
     results = await search_similar(query=query, top_k=top_k)
@@ -183,8 +184,8 @@ async def document_store_impl(action: str, collection: str, data: dict | None = 
     if normalized_collection in {"documents", "workspace_documents", "uploaded_documents"}:
         if normalized_action != "retrieve":
             raise ValueError("Documents collection supports retrieve action only")
-        docs = await db.documents.find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
-        return {"success": True, "data": docs, "count": len(docs), "collection": "documents"}
+        docs = await db[AIGERS_DOCUMENTS].find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
+        return {"success": True, "data": docs, "count": len(docs), "collection": AIGERS_DOCUMENTS}
 
     safe_collection = f"agent_data_{collection}"
 
@@ -596,7 +597,7 @@ async def trigger_hitl_impl(
 
 @mcp.tool
 async def semantic_search(query: str, top_k: int = 5) -> dict:
-    """Search indexed documents using semantic similarity via FAISS vector store."""
+    """Search indexed documents using semantic similarity via Mongo vector store."""
     return await semantic_search_impl(query=query, top_k=top_k)
 
 

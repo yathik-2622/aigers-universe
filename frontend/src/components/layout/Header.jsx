@@ -9,13 +9,15 @@ const TITLES = {
   '/agents': { title: 'Registered Agents', subtitle: 'Configure system prompts, tools, and HITL gates.' },
   '/builder': { title: 'Workflow Builder', subtitle: 'Attach policies, upload documents, save, and run.' },
   '/tools-chat': { title: 'AIger Copilot', subtitle: 'Platform-aware chat with models, MCP tools, file context, and agent guidance.' },
+  '/knowledge-base': { title: 'Knowledge Base', subtitle: 'Upload reusable documents, manage visibility, and explore semantic graph structure.' },
+  '/knowledge-graph': { title: 'Knowledge Graph', subtitle: 'Explore semantic document clusters and chunk-level similarity links in 2D/3D.' },
   '/runs': { title: 'Workflow Run', subtitle: 'Live execution, resumable steps, and readable reports.' },
   '/hitl': { title: 'Human-in-the-Loop', subtitle: 'Review and approve paused workflows.' },
   '/observability': { title: 'Observability', subtitle: 'Traces, tokens, latency, and cost across all runs.' },
   '/admin': { title: 'Admin Control Tower', subtitle: 'Global visibility across users, projects, and workflow operations.' },
 }
 
-const HIDDEN_ROUTES = new Set(['/dashboard', '/projects', '/marketplace', '/agents', '/hitl', '/admin', '/runs', '/tools-chat'])
+const HIDDEN_ROUTES = new Set(['/dashboard', '/projects', '/marketplace', '/agents', '/hitl', '/admin', '/runs', '/tools-chat', '/knowledge-graph', '/knowledge-base'])
 
 export default function Header() {
   const loc = useLocation()

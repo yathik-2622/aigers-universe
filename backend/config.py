@@ -44,9 +44,8 @@ class Settings(BaseSettings):
     OFFICIAL_DOCS_EXCERPT_TIMEOUT_SECONDS: int = Field(default=8)
     WEBPAGE_FETCH_TIMEOUT_SECONDS: int = Field(default=10)
     AGENT_STEP_TIMEOUT_SECONDS: int = Field(default=300)
-
-    # FAISS vector store
-    FAISS_INDEX_PATH: str = Field(default=str(BASE_DIR / "vectorstore" / "data" / "faiss_index"))
+    MONGO_VECTOR_INDEX_NAME: str = Field(default="vector_index")
+    MONGO_VECTOR_USE_ATLAS_SEARCH: bool = Field(default=True)
 
     # HITL
     HITL_TIMEOUT_SECONDS: int = Field(default=300)

@@ -402,6 +402,45 @@ yarn start</pre>
     </section>
 
     <section class="section">
+      <h2>16. Settings, Theme, and Provider Models</h2>
+      <ol>
+        <li>Open <code>Settings</code> from sidebar and from user card.</li>
+        <li>Switch provider between <code>Platform Gateway</code>, <code>OpenRouter</code>, <code>Groq</code>, and <code>NVIDIA</code>.</li>
+        <li>Add a key for one provider and click save.</li>
+        <li>Confirm model catalog updates and default model can be selected.</li>
+        <li>Switch theme to <code>Light</code>.</li>
+        <li>Open <code>AIger Copilot</code> and confirm background/surfaces change from dark palette to light palette.</li>
+      </ol>
+      <p><strong>Expected:</strong> settings persist per user, models are discovered dynamically, and light theme applies to Copilot and global shell.</p>
+    </section>
+
+    <section class="section">
+      <h2>17. Knowledge Graph 2D/3D</h2>
+      <ol>
+        <li>Open <code>Knowledge Graph</code> page.</li>
+        <li>Verify main/sub/chunk nodes render.</li>
+        <li>Toggle between 3D and 2D modes.</li>
+        <li>In 2D mode, change X/Y projection dimensions.</li>
+        <li>Click one category in legend to isolate the cluster.</li>
+        <li>Click one node to highlight neighbors and semantic links.</li>
+        <li>Drag nodes and click <code>Save layout</code>, then refresh page.</li>
+      </ol>
+      <p><strong>Expected:</strong> semantic edges show similarity-weighted color/width, highlight works, and saved layout reloads correctly.</p>
+    </section>
+
+    <section class="section">
+      <h2>18. Chunking Strategy Validation</h2>
+      <ol>
+        <li>Upload one document with <code>section-aware-large</code>.</li>
+        <li>Upload one document with <code>sliding-window</code>.</li>
+        <li>Upload one document with <code>table-first</code>.</li>
+        <li>Upload one document with <code>semantic-topic</code>.</li>
+        <li>Check document records and confirm <code>chunk_strategy</code> is stored.</li>
+      </ol>
+      <p><strong>Expected:</strong> all four strategies ingest successfully and are persisted in document metadata.</p>
+    </section>
+
+    <section class="section">
       <h2>16. Completion Checklist</h2>
       <ul class="checklist">
         <li>Login works</li>
@@ -421,6 +460,10 @@ yarn start</pre>
         <li>Report opens from run page</li>
         <li>Copilot sessions persist</li>
         <li>Copilot auto-tool selection and explicit tool selection both work</li>
+        <li>Settings page provider/model/theme controls persist</li>
+        <li>Light theme renders correctly in Copilot</li>
+        <li>Knowledge Graph 2D/3D mode and sector isolation work</li>
+        <li>Chunking strategy selection persists in document metadata</li>
         <li>Reasoning logs and live trace work dynamically</li>
       </ul>
     </section>

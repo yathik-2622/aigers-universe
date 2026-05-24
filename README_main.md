@@ -10,11 +10,11 @@ For the full end-user walkthrough — concepts, prompts, best practices, page-by
 ---
 
 ## Tech stack
-**Backend**: FastAPI · Motor (async MongoDB) · `fastmcp` (MCP) · `fastapi-mcp` (mount `/mcp`) · `python-a2a` · `langgraph` + `InMemorySaver` · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · `faiss-cpu` · `PyMuPDF` + `python-docx` · `structlog`.
+**Backend**: FastAPI · Motor (async MongoDB) · `fastmcp` (MCP) · `fastapi-mcp` (mount `/mcp`) · `python-a2a` · `langgraph` + `InMemorySaver` · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · MongoDB vector chunks · `PyMuPDF` + `pdfplumber` + `pytesseract` · `structlog`.
 
 **Frontend**: Vite · React 18 · React Router 6 (v7 future flags on) · `reactflow` · `recharts` · `tailwindcss` (dark enterprise theme) · `lucide-react` · `sonner`.
 
-**Storage**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `governance_rules`, `marketplace_templates`) + FAISS (`IndexFlatL2`, disk-persisted).
+**Storage**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `governance_rules`, `marketplace_templates`, `vector_chunks`) with Atlas vector search or in-app cosine fallback.
 
 ---
 
@@ -34,7 +34,7 @@ FastAPI (port 8001, prefix /api)
   ├── /api/hitl      (pending · approve · reject)
   ├── /api/observability (metrics · traces)
   ├── /api/marketplace (idempotent install)
-  ├── /api/documents (PDF/DOCX/TXT upload → FAISS)
+  ├── /api/documents (document upload → Mongo vector chunks)
   └── /mcp           (FastApiMCP SSE endpoint)
 
 Engine:
@@ -84,7 +84,7 @@ Required `.env` values:
 | `APP_PORT` | `8001` | Keep `8001` to match the bundled Emergent ingress; locally any free port works |
 | `CORS_ORIGINS` | `*` | Or comma-separated list of origins |
 | `LOG_JSON_FORMAT` | `false` | `true` for production JSON logs |
-| `FAISS_INDEX_PATH` | `./vectorstore/data/faiss_index` | Created on first upload |
+| `MONGO_VECTOR_INDEX_NAME` | `vector_index` | Atlas vector index name |
 | `HITL_TIMEOUT_SECONDS` | `300` | Auto-reject if no human action within timeout |
 
 Run the backend:
@@ -183,7 +183,7 @@ This will:
 1. Hit `/api/health`.
 2. Confirm the 5 marketplace templates seeded.
 3. Install + invoke an agent end-to-end (real LLM call).
-4. Upload a `.txt` document, chunk it, index into FAISS.
+4. Upload a document, chunk it, and index it into Mongo vector chunks.
 5. Create a 2-agent workflow, run it, poll until `completed`.
 6. Verify A2A messages and traces persisted.
 7. Verify HITL endpoints (`/pending`, `/approve`, `/reject`).
@@ -213,7 +213,7 @@ The dist folder can be served by any static host (Nginx, S3+CloudFront, Vercel, 
 │   ├── a2a/             # python-a2a + Mongo audit
 │   ├── hitl/            # interrupt/resume manager
 │   ├── observability/   # tracer + aggregations
-│   ├── vectorstore/     # FAISS (disk-persisted)
+│   ├── vectorstore/     # Mongo-backed vector storage helpers
 │   ├── middleware/      # request_id + structured log
 │   ├── db/              # Motor client · seed · repositories
 │   └── tests/

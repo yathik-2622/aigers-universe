@@ -23,7 +23,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "type": "function",
         "function": {
             "name": "semantic_search",
-            "description": "Search indexed documents using semantic similarity (FAISS).",
+            "description": "Search indexed documents using semantic similarity (Mongo vector store).",
             "parameters": {
                 "type": "object",
                 "properties": {

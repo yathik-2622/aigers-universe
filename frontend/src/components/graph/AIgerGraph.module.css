@@ -1,0 +1,54 @@
+.pageRoot {
+  position: relative;
+  min-height: calc(100vh - 2rem);
+  border-radius: 32px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 24%),
+    radial-gradient(circle at 85% 12%, rgba(74, 222, 128, 0.12), transparent 20%),
+    radial-gradient(circle at bottom center, rgba(251, 191, 36, 0.1), transparent 18%),
+    #020617;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  padding: 8px 12px;
+  font-size: 12px;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.legendItem:hover,
+.legendItemActive {
+  transform: translateY(-1px);
+  border-color: rgba(110, 231, 183, 0.4);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.legendSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legendLabel {
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.legendCount {
+  color: rgba(226, 232, 240, 0.72);
+  font-family: 'Geist Mono', monospace;
+}

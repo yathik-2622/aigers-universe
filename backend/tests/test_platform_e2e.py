@@ -89,7 +89,7 @@ class TestPlatform:
         request.config.cache.set("invoke_test_agent_id", aid)
 
 
-# --- Document upload + FAISS ---
+# --- Document upload + Mongo vector search ---
 class TestDocument:
     def test_upload_txt(self, session, request):
         content = ("This is a sample compliance document. " * 50).encode()

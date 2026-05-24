@@ -374,7 +374,7 @@
 Backend
   -> FastAPI routers
   -> MongoDB persistence
-  -> FAISS retrieval
+  -> Mongo vector retrieval
   -> FastMCP + FastAPI-MCP
   -> Workflow engine + framework runners
 
@@ -392,7 +392,7 @@ Execution
         </article>
         <article class="card">
           <h3>Backend Stack</h3>
-          <p>FastAPI, Motor, MongoDB, FastMCP, FastAPI-MCP, LangGraph, LangChain, CrewAI, Agno, FAISS, structlog, OpenAI-compatible gateway.</p>
+          <p>FastAPI, Motor, MongoDB, FastMCP, FastAPI-MCP, LangGraph, LangChain, CrewAI, Agno, Mongo vector chunks, structlog, OpenAI-compatible gateway.</p>
         </article>
       </div>
     </section>
@@ -481,7 +481,35 @@ npm run start</pre>
     </section>
 
     <section class="section">
-      <h2>12. References</h2>
+      <h2>12. 2D/3D Knowledge Graph and Chunking Runtime</h2>
+      <div class="two-col">
+        <article class="card">
+          <h3>Knowledge Graph UI</h3>
+          <p>The platform now includes a dedicated <code>Knowledge Graph</code> page with:</p>
+          <ul>
+            <li>2D/3D rendering toggle using shared graph data</li>
+            <li>Main, sub, and chunk node layers</li>
+            <li>Similarity-weighted semantic links</li>
+            <li>Sector legend isolation filters</li>
+            <li>Node drag and persisted layout save</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Chunking Strategies</h3>
+          <p>Document ingestion supports four strategy options:</p>
+          <ul>
+            <li><code>hierarchical</code></li>
+            <li><code>fixed-token</code></li>
+            <li><code>sentence-window</code></li>
+            <li><code>semantic</code></li>
+          </ul>
+          <p>Each uploaded document stores the selected strategy in metadata as <code>chunk_strategy</code>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>13. References</h2>
       <div class="two-col">
         <article class="card">
           <h3>Repo Docs</h3>
@@ -499,9 +527,13 @@ npm run start</pre>
           <p><a href="https://reactflow.dev/" target="_blank" rel="noreferrer">React Flow</a></p>
           <p><a href="https://vite.dev/guide/" target="_blank" rel="noreferrer">Vite</a></p>
           <p><a href="https://www.mongodb.com/docs/" target="_blank" rel="noreferrer">MongoDB</a></p>
-          <p><a href="https://github.com/facebookresearch/faiss" target="_blank" rel="noreferrer">FAISS</a></p>
+          <p>MongoDB vector chunks with Atlas vector search fallback</p>
           <p><a href="https://docs.crewai.com/" target="_blank" rel="noreferrer">CrewAI</a></p>
           <p><a href="https://docs.agno.com/" target="_blank" rel="noreferrer">Agno</a></p>
+          <p><a href="https://www.npmjs.com/package/react-force-graph" target="_blank" rel="noreferrer">react-force-graph</a></p>
+          <p><a href="https://www.npmjs.com/package/d3-force-3d" target="_blank" rel="noreferrer">d3-force-3d</a></p>
+          <p><a href="https://docs.langchain.com/oss/python/integrations/splitters/recursive_text_splitter" target="_blank" rel="noreferrer">LangChain Recursive Splitter</a></p>
+          <p><a href="https://arxiv.org/abs/2307.03172" target="_blank" rel="noreferrer">Lost in the Middle</a></p>
         </article>
       </div>
     </section>
@@ -526,7 +558,7 @@ npm run start</pre>
     ];
 
     const tools = [
-      ["semantic_search", "query, top_k", "results[], count", "FAISS search over reusable KB chunks."],
+      ["semantic_search", "query, top_k", "results[], count", "Mongo vector search over reusable KB chunks."],
       ["knowledge_base_search", "query, top_k", "matches[], count", "KB-friendly alias around semantic retrieval."],
       ["document_store", "action, collection, data?, query?, limit?", "success/id or data[]", "Persists intermediate agent-side structured data."],
       ["rules_engine_check", "text, rule_category?, policy_ids?", "matched_rules[], overall_status", "Checks text against stored governance rules."],

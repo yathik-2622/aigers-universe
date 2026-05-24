@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, 
 from pydantic import BaseModel, Field
 
 from core.request_context import get_optional_user_id
-from api.document_router import _extract_docx_text, _extract_pdf_text
+from api.document_router import _extract_text_from_file
 from db.mongo_client import get_db
 
 router = APIRouter()
@@ -69,12 +69,7 @@ async def upload_policy(request: Request, file: UploadFile = File(...), severity
     filename = file.filename or "policy.txt"
     ext = os.path.splitext(filename)[1].lower()
     content = await file.read()
-    if ext == ".pdf":
-        text = _extract_pdf_text(content)
-    elif ext == ".docx":
-        text = _extract_docx_text(content)
-    else:
-        text = content.decode("utf-8", errors="ignore")
+    text = _extract_text_from_file(filename, content, file.content_type) if ext in {".pdf", ".docx", ".html", ".htm", ".json", ".xml"} else content.decode("utf-8", errors="ignore")
     if not text.strip():
         raise HTTPException(status_code=422, detail="No text could be extracted from the policy file")
     now = datetime.datetime.utcnow().isoformat()

@@ -13,12 +13,14 @@ import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import MarketplacePage from './pages/MarketplacePage.jsx'
 import ObservabilityPage from './pages/ObservabilityPage.jsx'
+import KnowledgeBasePage from './pages/KnowledgeBasePage.jsx'
+import KnowledgeGraphPage from './pages/KnowledgeGraphPage.jsx'
 import ProjectsPage from './pages/ProjectsPage.jsx'
 import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
-import SettingsPage from './pages/SettingsPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 
 function ProtectedShell() {
   const { ready, user } = useAuth()
@@ -40,11 +42,13 @@ function ProtectedShell() {
               <Route path="/builder" element={<WorkflowBuilderPage />} />
               <Route path="/builder/:workflowId" element={<WorkflowBuilderPage />} />
               <Route path="/tools-chat" element={<ToolPlaygroundPage />} />
+              <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
               <Route path="/runs/:runId" element={<WorkflowRunPage />} />
               <Route path="/hitl" element={<HITLPage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
               <Route path="/admin" element={<AdminPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>

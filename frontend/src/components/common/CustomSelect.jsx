@@ -53,13 +53,14 @@ export default function CustomSelect({
         aria-expanded={open}
         aria-label={label}
         onClick={() => !disabled && setOpen((state) => !state)}
-        className={`inline-flex min-h-[42px] w-full items-center justify-between gap-3 rounded-[20px] border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-sm text-[#dfe8f7] backdrop-blur-xl transition hover:border-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${buttonClassName}`}
+        className={`inline-flex min-h-[42px] w-full items-center justify-between gap-3 rounded-[20px] border border-line bg-white/[0.04] px-3 py-2 text-left text-sm text-ink/90 backdrop-blur-xl transition hover:border-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${buttonClassName}`}
+
       >
         <span className="min-w-0 truncate">{selected?.label || label}</span>
         <ChevronDown size={14} className={`shrink-0 text-muted transition ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className={`absolute left-0 z-50 min-w-full overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(13,18,32,0.97),rgba(8,12,24,0.97))] p-1.5 shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl ${placementClass} ${menuClassName}`}>
+        <div className={`absolute left-0 z-50 min-w-full overflow-hidden rounded-[24px] border border-line bg-panel p-1.5 shadow-[0_24px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl ${placementClass} ${menuClassName}`}>
           {label && <div className="px-3 pb-2 pt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{label}</div>}
           <div className={`${maxHeightClass} space-y-1 overflow-y-auto pr-1`}>
             {normalizedOptions.map((option) => (
@@ -74,14 +75,25 @@ export default function CustomSelect({
                   onChange?.(option.value)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${
+                className={`group flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${
                   option.value === value
                     ? 'bg-accent/14 text-ink'
-                    : 'bg-transparent text-[#cfdbef] hover:bg-white/[0.06]'
-                } ${option.disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+                    : 'bg-transparent text-ink/70 hover:bg-accent/12'
+                } ${option.disabled ? 'cursor-not-allowed opacity-50' : ''} ${option.hoverBgClass || ''}`}
               >
                 <span className="min-w-0 truncate">{option.label}</span>
-                {option.meta && <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">{option.meta}</span>}
+                <div className="flex min-w-0 items-center gap-3 justify-end">
+                  {option.meta && (
+                    <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">
+                      {option.meta}
+                    </span>
+                  )}
+                  {option.help && (
+                    <span className="pointer-events-none hidden group-hover:inline min-w-0 truncate text-[11px] text-ink/80">
+                      {option.help}
+                    </span>
+                  )}
+                </div>
               </button>
             ))}
           </div>

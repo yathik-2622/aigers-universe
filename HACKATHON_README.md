@@ -34,7 +34,7 @@ AIger's Universe is an enterprise agent orchestration platform that lets users:
 - FastMCP
 - FastAPI-MCP
 - OpenAI-compatible gateway
-- FAISS
+- MongoDB vector chunks
 - PyMuPDF
 - python-docx
 - structlog
@@ -50,7 +50,7 @@ AIger's Universe is an enterprise agent orchestration platform that lets users:
 - sonner
 
 ## Architecture Summary
-The frontend provides a premium multi-page control surface for agents, marketplace installs, workflow building, workflow runs, HITL, observability, and AIger Copilot. The backend exposes API routes for agent CRUD, workflow execution, MCP-backed tools, KB ingestion, workflow inputs, A2A routing, HITL pause/resume, and reporting. MongoDB stores agents, workflows, runs, traces, HITL records, documents, chat sessions, and A2A messages. FAISS supports reusable KB semantic search. The workflow engine coordinates multi-agent execution, tool calling, upstream context passing, and report generation.
+The frontend provides a premium multi-page control surface for agents, marketplace installs, workflow building, workflow runs, HITL, observability, and AIger Copilot. The backend exposes API routes for agent CRUD, workflow execution, MCP-backed tools, KB ingestion, workflow inputs, A2A routing, HITL pause/resume, and reporting. MongoDB stores agents, workflows, runs, traces, HITL records, documents, chat sessions, A2A messages, and reusable vector chunks for KB semantic search. The workflow engine coordinates multi-agent execution, tool calling, upstream context passing, and report generation.
 
 ## Setup Instructions
 

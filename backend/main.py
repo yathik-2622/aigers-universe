@@ -20,7 +20,7 @@ from api.hitl_router import router as hitl_router
 from api.observability_router import router as observability_router
 from api.marketplace_router import router as marketplace_router
 from api.document_router import router as document_router
-from api.document_router import cleanup_expired_workflow_inputs
+from api.document_router import cleanup_expired_workflow_inputs, ensure_document_indexes
 from api.auth_router import router as auth_router
 from api.policy_router import router as policy_router
 from api.project_router import router as project_router
@@ -28,6 +28,7 @@ from api.admin_router import router as admin_router
 from api.tool_chat_router import router as tool_chat_router
 from api.a2a_router import router as a2a_router
 from api.settings_router import router as settings_router
+from api.knowledge_graph_router import router as knowledge_graph_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     logger.info("aigers_universe.startup.begin", version="1.0.0")
     try:
         await connect_db()
+        await ensure_document_indexes()
         await run_seed()
         await cleanup_expired_workflow_inputs()
         register_all_tools()
@@ -87,6 +89,7 @@ app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 app.include_router(tool_chat_router, prefix="/api/tool-chat", tags=["Tool Chat"])
 app.include_router(a2a_router, prefix="/api/a2a", tags=["A2A"])
 app.include_router(settings_router, prefix="/api/settings", tags=["Settings"])
+app.include_router(knowledge_graph_router, prefix="/api/knowledge-graph", tags=["Knowledge Graph"])
 
 
 # Mount FastApiMCP — exposes /mcp endpoint with all registered tools
