@@ -29,7 +29,7 @@ A generic, domain-agnostic platform that lets you:
 5. [Page-by-page reference](#page-by-page-reference)
 6. [Best practices for great agent orchestration](#best-practices-for-great-agent-orchestration)
 7. [Authoring your own agents from scratch](#authoring-your-own-agents-from-scratch)
-8. [Document inputs, FAISS, and `semantic_search`](#document-inputs-faiss-and-semantic_search)
+8. [Document inputs, Mongo vector search, and `semantic_search`](#document-inputs-mongo-vector-search-and-semantic_search)
 9. [HITL gates — when, how, and what to put in the prompt](#hitl-gates--when-how-and-what-to-put-in-the-prompt)
 10. [Reading the Observability dashboard](#reading-the-observability-dashboard)
 11. [API reference](#api-reference)
@@ -55,7 +55,7 @@ A generic, domain-agnostic platform that lets you:
 
 | Tool | What it does | Typical use |
 |---|---|---|
-| `semantic_search` | FAISS similarity over uploaded documents | "Find clauses about indemnity in the uploaded contract" |
+| `semantic_search` | Mongo vector similarity over uploaded documents | "Find clauses about indemnity in the uploaded contract" |
 | `knowledge_base_search` | Semantic retrieval over uploaded KB files and imported repo context | "Find current deployment constraints in my modernization KB" |
 | `document_store` | CRUD on agent-owned MongoDB collections (`agent_data_*`) | Persist intermediate findings across agents |
 | `rules_engine_check` | Runs text against seeded governance rules via LLM | PII / compliance / export-control sweeps |
@@ -353,12 +353,12 @@ curl -X POST "$BASE/api/platform/agents/$AGENT_ID/invoke" -H "Content-Type: appl
 
 ---
 
-## Document inputs, FAISS, and `semantic_search`
+## Document inputs, Mongo vector search, and `semantic_search`
 1. Upload via **Builder → Upload** or `POST /api/documents/upload`.
 2. Text is extracted (PyMuPDF for PDF, python-docx for DOCX, raw for TXT).
 3. Text is chunked at 1000 chars with 200-char overlap.
-4. Each chunk is embedded via `text-embedding-3-small` and added to FAISS `IndexFlatL2`.
-5. The FAISS index is persisted to `backend/vectorstore/data/faiss_index.*`.
+4. Each chunk is embedded via the configured embedding model and stored in Mongo `vector_chunks`.
+5. Atlas vector search is used when configured, otherwise the app falls back to in-process cosine similarity.
 6. When an agent calls `semantic_search(query, top_k=5)`, the tool embeds the query and returns the top-k chunks with similarity scores + metadata (document_id, filename, chunk_index).
 
 > Tip: mention "use `semantic_search` to ground your answer" in the system prompt to ensure the model retrieves before reasoning.
@@ -459,7 +459,7 @@ Click the run id to jump back into the live run page.
 | Backend won't start | `tail -n 100 /var/log/supervisor/backend.err.log` — usually missing env or DB unreachable |
 | `401` from LLM | `LLM_API_KEY` invalid — replace in `backend/.env`, restart backend |
 | `Agent invocation failed: insufficient quota` | Gateway out of credits — top up |
-| FAISS returns empty | Upload at least one document first |
+| Vector search returns empty | Upload at least one document first |
 | HITL not pausing | Agent must (a) have `trigger_hitl` in `tools` AND (b) prompt must instruct it to call the tool |
 | Workflow stuck `running` | Check run status — if an agent threw, status flips to `failed` with `failure_reason` |
 | ReactFlow canvas blank | Hard refresh (CSS not loaded) |
@@ -655,6 +655,6 @@ Click the run id to jump back into the live run page.
 - **A2A** — Agent-to-Agent. Google's open spec for inter-agent messaging. We use `python-a2a` for descriptors + Mongo for the message bus.
 - **LangGraph** — Stateful graph orchestration over LangChain. We use it for the workflow chain + `interrupt()`/`Command` HITL resume.
 - **InMemorySaver** — LangGraph checkpointer kept in memory. Fine for single replica; switch to `AsyncPostgresSaver` for HA.
-- **FAISS** — Facebook AI similarity search. `IndexFlatL2` is exact, good up to ~100k vectors.
+- **Mongo vector chunks** — Embeddings stored in MongoDB, queried with Atlas vector search or in-app cosine similarity.
 - **SSE** — Server-Sent Events. One-way HTTP stream we use for live run updates.
 - **HITL** — Human-in-the-Loop. A pause-and-approve gate inside a workflow.

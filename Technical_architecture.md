@@ -8,7 +8,7 @@ AIger's Universe is a multi-agent orchestration platform for enterprise AI workf
 - framework-native agent execution for LangGraph, LangChain, CrewAI, and Agno
 - MCP-based tool access
 - A2A-based agent interoperability
-- KB retrieval over MongoDB + FAISS
+- KB retrieval over MongoDB documents + Mongo vector chunks
 - run-scoped workflow inputs
 - HITL approvals
 - live run streaming and observability
@@ -29,7 +29,7 @@ It is positioned as an enterprise-grade agent engineering workbench rather than 
   - FastAPI application
   - MCP server registration
   - MongoDB persistence
-  - FAISS vector retrieval
+  - Mongo vector retrieval
   - LLM gateway access
 
 ### 2.2 Primary interaction model
@@ -102,7 +102,7 @@ Important settings:
 - persistence:
   - `MONGO_URL`
   - `DB_NAME`
-  - `FAISS_INDEX_PATH`
+  - `MONGO_VECTOR_INDEX_NAME`
 - auth and access:
   - `JWT_SECRET`
   - `JWT_EXPIRES_HOURS`
@@ -188,25 +188,25 @@ It also supports deduplication of installed agents tied to templates.
 
 ## 6. Knowledge and Retrieval Architecture
 
-### 6.1 FAISS vector store
+### 6.1 Mongo vector store
 
-Source: [backend/vectorstore/faiss_store.py](</c:/Users/yathi/OneDrive/Desktop/DeskTop/MY_WORKS/TPL/aigers-universe/backend/vectorstore/faiss_store.py:1>)
+Source: [mongo_vector_store.py](/C:/Users/yathi/OneDrive/Desktop/DeskTop/MY_WORKS/TPL/aigers-universe/backend/vectorstore/mongo_vector_store.py:1)
 
 Algorithm:
 
 - chunk text
 - embed each chunk through `get_embedding()`
-- store in FAISS `IndexFlatL2`
+- store embeddings in Mongo `vector_chunks`
 - persist metadata alongside vector positions
 
-`IndexFlatL2` is exact nearest-neighbor search using L2 distance.
+Atlas vector search is preferred when available, with in-app cosine fallback otherwise.
 
 ### 6.2 Two context planes
 
 AIger's Universe separates:
 
 - reusable knowledge base context
-  - indexed into FAISS
+  - indexed into Mongo vector chunks
   - used by `knowledge_base_search`
 - run-scoped workflow inputs
   - stored in MongoDB only
@@ -498,7 +498,7 @@ Tool registration starts with:
 ### 11.1 Tool catalog
 
 - `semantic_search`
-  - exact vector similarity over FAISS chunks
+  - Atlas vector search or exact cosine similarity over Mongo chunks
 - `knowledge_base_search`
   - KB-oriented semantic retrieval
 - `document_store`

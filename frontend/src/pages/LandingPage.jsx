@@ -86,7 +86,19 @@ const CAPABILITIES = [
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#05070f] text-ink">
+    <div
+      className="relative min-h-screen overflow-x-hidden bg-[#05070f] text-ink"
+      style={{
+        '--color-bg': '5 7 15',
+        '--color-panel': '9 17 32',
+        '--color-elev': '10 20 40',
+        '--color-line': '39 51 76',
+        '--color-ink': '233 233 247',
+        '--color-muted': '148 163 184',
+        '--color-accent': '0 213 255',
+        '--color-accent2': '99 102 241',
+      }}
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(0,213,255,0.16),transparent_24%),radial-gradient(circle_at_88%_10%,rgba(140,125,255,0.16),transparent_22%),radial-gradient(circle_at_50%_78%,rgba(20,255,179,0.08),transparent_28%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-35 bg-[linear-gradient(rgba(0,213,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(140,125,255,0.045)_1px,transparent_1px)] bg-[size:42px_42px]" />
 

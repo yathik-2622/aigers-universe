@@ -1,6 +1,7 @@
 import json
 import re
 
+from db.collection_names import AIGERS_DOCUMENTS
 from db.mongo_client import get_db
 
 
@@ -173,7 +174,7 @@ async def build_run_report(run: dict) -> dict:
     db = get_db()
     input_data = run.get("input_data") or {}
     document_id = input_data.get("document_id")
-    doc = await db.documents.find_one({"document_id": document_id}, {"_id": 0, "text": 1, "filename": 1}) if document_id else None
+    doc = await db[AIGERS_DOCUMENTS].find_one({"document_id": document_id}, {"_id": 0, "text": 1, "filename": 1}) if document_id else None
     workflow_inputs = input_data.get("workflow_inputs") or {}
 
     fallback_sections = []

@@ -8,7 +8,7 @@
 [![React](https://img.shields.io/badge/React-18-20232A?logo=react&logoColor=61DAFB)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-Frontend-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Database-13AA52?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-[![FAISS](https://img.shields.io/badge/FAISS-Vector_Search-0467DF)](https://github.com/facebookresearch/faiss)
+[![Mongo Vectors](https://img.shields.io/badge/Mongo-Vector_Search-13AA52)](https://www.mongodb.com/)
 [![LangChain](https://img.shields.io/badge/LangChain-Agent_Framework-121212)](https://www.langchain.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B35)](https://www.langchain.com/langgraph)
 [![CrewAI](https://img.shields.io/badge/CrewAI-Multi_Agent-6E56CF)](https://www.crewai.com/)
@@ -62,6 +62,9 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Agent model selection from the gateway model catalog.
 - Runtime settings now support OpenAI-compatible gateways, OpenRouter, Groq, and NVIDIA model discovery with per-user secrets stored in MongoDB.
 - AI responses now render structured JSON, markdown tables, code fences, and Mermaid `erDiagram` content in the UI instead of collapsing everything into plain text.
+- New Knowledge Graph page supports 2D/3D semantic document visualization, category isolation, neighbor highlighting, and persisted node layout.
+- Document uploads now support selectable HCKB chunking strategies (`section-aware-large`, `page-based-large`, `sliding-window`, `code-aware`, `table-first`, `markdown`, `semantic-topic`) with stored `chunk_strategy` metadata.
+- Copilot page now respects light theme shell styling instead of remaining visually dark-only.
 - Mongo-backed workflow resume after interruption or backend restart.
 - Migration marketplace now includes framework-native CrewAI and Agno templates for Java, Spring Boot, Python, Streamlit, React, Next.js, and .NET modernization tasks.
 
@@ -92,13 +95,15 @@ For a browser-friendly QA handoff page, open **[docs/e2e-testing.html](./docs/e2
 
 ## Tech stack
 
-**Backend**: FastAPI · Python · Motor (async MongoDB) · `fastmcp` · `fastapi-mcp` · `python-a2a` · `langgraph` · `langchain` · `CrewAI` · `Agno` · MCP Protocol · A2A Protocol · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · `faiss-cpu` · `PyMuPDF` · `python-docx` · `structlog` · JWT Auth · SSE Streaming.
+**Backend**: FastAPI · Python · Motor (async MongoDB) · `fastmcp` · `fastapi-mcp` · `python-a2a` · `langgraph` · `langchain` · `CrewAI` · `Agno` · MCP Protocol · A2A Protocol · `openai` (Tiger Analytics gateway, gpt-4o + text-embedding-3-small) · `PyMuPDF` · `pdfplumber` · `python-docx` · `langchain-community` loaders · `structlog` · JWT Auth · SSE Streaming.
 
 **Frontend**: Vite · React 18 · React Router 6 · `reactflow` · `recharts` · `tailwindcss` · `lucide-react` · `sonner` · Enterprise dark-theme workflow canvas UI.
 
 **AI / Orchestration**: Multi-Agent Workflows · Agentic AI · Workflow Orchestration · Framework-native Agent Runtime Execution · MCP Tooling · A2A Agent Communication · HITL (Human-in-the-Loop) · Workflow Auto-Planning · Observability & Tracing · AI Governance.
 
-**Storage & Retrieval**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `governance_rules`, `marketplace_templates`) · FAISS (`IndexFlatL2`, disk-persisted vector search for reusable KB context) · Run-scoped workflow inputs persisted separately in MongoDB.
+**Storage & Retrieval**: MongoDB (`agents`, `workflow_definitions`, `workflow_runs`, `agent_traces`, `hitl_records`, `a2a_messages`, `documents`, `vector_chunks`, `governance_rules`, `marketplace_templates`) · Mongo-backed semantic vector retrieval for reusable KB context · Run-scoped workflow inputs persisted separately in MongoDB.
+
+**Atlas Vector Search**: Set `MONGO_VECTOR_INDEX_NAME` and keep `MONGO_VECTOR_USE_ATLAS_SEARCH=true` to use MongoDB Atlas `$vectorSearch` on `vector_chunks.embedding`. The backend falls back to in-app cosine ranking if the Atlas index is not ready yet.
 
 ---
 
@@ -178,7 +183,6 @@ Required `.env` values:
 | `A2A_SHARED_SECRET` | `shared-secret` | Optional shared secret for remote A2A card/invoke endpoints |
 | `A2A_PUBLIC_BASE_URL` | `http://localhost:8001` | Public base URL used in generated agent cards |
 | `OFFICIAL_DOCS_MAX_RESULTS` | `5` | Max results returned by official-doc adapters |
-| `FAISS_INDEX_PATH` | `./vectorstore/data/faiss_index` | Created on first upload |
 | `HITL_TIMEOUT_SECONDS` | `300` | Auto-reject if no human action within timeout |
 | `WORKFLOW_INPUT_RETENTION_DAYS` | `7` | Retention period for run-scoped workflow inputs |
 | `WORKFLOW_INPUT_MAX_FILES` | `6` | Max workflow input files attached to one run |
@@ -339,7 +343,6 @@ OPENWEATHER_API_KEY=
 A2A_SHARED_SECRET=
 A2A_PUBLIC_BASE_URL=http://localhost:8001
 OFFICIAL_DOCS_MAX_RESULTS=5
-FAISS_INDEX_PATH=./vectorstore/data/faiss_index
 HITL_TIMEOUT_SECONDS=300
 WORKFLOW_INPUT_RETENTION_DAYS=7
 WORKFLOW_INPUT_MAX_FILES=6
@@ -368,7 +371,7 @@ VITE_REACT_APP_BACKEND_URL=http://localhost:8001
 │   ├── a2a/             # python-a2a + Mongo audit
 │   ├── hitl/            # interrupt/resume manager
 │   ├── observability/   # tracer + aggregations
-│   ├── vectorstore/     # FAISS (disk-persisted)
+│   ├── vectorstore/     # Mongo-backed vector retrieval helpers
 │   ├── middleware/      # request_id + structured log
 │   ├── db/              # Motor client · seed · repositories
 │   └── tests/

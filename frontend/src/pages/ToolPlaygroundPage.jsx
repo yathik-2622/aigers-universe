@@ -34,6 +34,7 @@ import {
   updateChatSession,
   uploadChatFiles,
 } from '../api/toolChat.js'
+import { useSettings } from '../context/SettingsContext.jsx'
 import { normalizeModelOptions } from '../lib/modelOptions.js'
 
 const MODES = {
@@ -300,6 +301,8 @@ function UserMessage({ message, onCopy }) {
 }
 
 export default function ToolPlaygroundPage() {
+  const { settings } = useSettings()
+  const isLightTheme = (settings?.theme || 'dark') === 'light'
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState('')
   const [session, setSession] = useState(null)
@@ -665,7 +668,7 @@ export default function ToolPlaygroundPage() {
 
   if (hydrating) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#05070f]">
+      <div className="flex h-full items-center justify-center bg-bg">
         <div className="inline-flex items-center gap-3 rounded-[28px] border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-muted backdrop-blur-xl">
           <LoaderCircle size={16} className="animate-spin text-accent" />
           Loading AIger Copilot...
@@ -675,7 +678,7 @@ export default function ToolPlaygroundPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-[#05070f] text-ink">
+    <div className={`copilot-shell flex h-full min-h-0 bg-bg text-ink ${isLightTheme ? 'bg-[rgb(248,250,252)]' : ''}`}>
       <input
         ref={fileInputRef}
         type="file"
@@ -685,7 +688,7 @@ export default function ToolPlaygroundPage() {
         onChange={uploadFiles}
       />
 
-      <aside className={`${historyCollapsed ? 'w-[76px]' : 'w-[312px]'} shrink-0 bg-black/40 backdrop-blur-2xl transition-[width] duration-200 flex flex-col`}>
+      <aside className={`${historyCollapsed ? 'w-[76px]' : 'w-[312px]'} shrink-0 bg-panel/70 backdrop-blur-2xl transition-[width] duration-200 flex flex-col`}>
         <div className="flex h-16 items-center justify-between px-4">
           <div className={`flex items-center gap-3 overflow-hidden transition ${historyCollapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-accent/20 bg-accent/10 shadow-[0_0_36px_rgba(0,213,255,0.12)]">
@@ -802,7 +805,7 @@ export default function ToolPlaygroundPage() {
                       key={prompt}
                       type="button"
                       onClick={() => submit(prompt)}
-                      className="rounded-[26px] border border-white/8 bg-white/[0.03] px-5 py-5 text-left text-sm leading-7 text-[#dce6f7] backdrop-blur-xl transition hover:border-accent/30 hover:bg-white/[0.05]"
+                      className="rounded-[26px] border border-white/8 bg-white/[0.03] px-5 py-5 text-left text-sm leading-7 text-ink backdrop-blur-xl transition hover:border-accent/30 hover:bg-white/[0.05]"
                     >
                       {prompt}
                     </button>
@@ -833,7 +836,7 @@ export default function ToolPlaygroundPage() {
 
         <div className="px-4 pb-5 pt-3 md:px-8">
           <div className="mx-auto max-w-4xl">
-            <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(17,21,34,0.9),rgba(10,14,24,0.9))] shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+            <div className="rounded-[30px] border border-white/10 bg-panel/85 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
               <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:px-5">
                 <CustomSelect
                   label="Mode"
@@ -881,7 +884,7 @@ export default function ToolPlaygroundPage() {
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={placeholder}
                   rows={1}
-                  className="max-h-[140px] min-h-[36px] w-full resize-none overflow-y-auto bg-transparent px-1 py-1.5 text-[14px] leading-6 text-ink outline-none placeholder:text-[#8d97ab]"
+                  className="max-h-[140px] min-h-[36px] w-full resize-none overflow-y-auto bg-transparent px-1 py-1.5 text-[14px] leading-6 text-ink outline-none placeholder:text-muted"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
@@ -899,7 +902,9 @@ export default function ToolPlaygroundPage() {
                     type="button"
                     onClick={() => submit()}
                     disabled={busy || creating}
-                    className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-black transition hover:opacity-90 disabled:opacity-50"
+                    className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition hover:opacity-90 disabled:opacity-50 ${
+                      isLightTheme ? 'bg-accent text-white shadow-[0_12px_32px_rgba(37,99,235,0.18)]' : 'bg-white text-black'
+                    }`}
                   >
                     {busy ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}
                     {busy ? 'Streaming...' : 'Send'}
@@ -918,14 +923,14 @@ export default function ToolPlaygroundPage() {
         subtitle={activeReasoningMessage?.streaming ? 'Streaming step-by-step backend activity' : 'Captured reasoning steps for this response'}
         width="max-w-3xl"
       >
-        <div className="bg-[radial-gradient(circle_at_top,rgba(0,213,255,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] p-6">
+        <div className="bg-elev/70 p-6">
           <div className="flex flex-wrap items-center gap-2">
             <MetaTag label="Mode" value={activeReasoningMessage?.mode === 'general' ? 'General' : 'AIger Copilot'} />
             <MetaTag label="Model" value={activeReasoningMessage?.model_name || 'gpt-4o'} />
             <MetaTag label="State" value={activeReasoningMessage?.streaming ? 'streaming' : 'complete'} />
           </div>
           {activeReasoningMessage?.processing_logs?.length > 0 && (
-            <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 p-4 text-sm text-[#d7eff7]">
+            <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 p-4 text-sm text-ink">
               <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-accent">
                 <span className={`inline-flex h-2 w-2 rounded-full bg-accent ${activeReasoningMessage?.streaming ? 'animate-pulse' : ''}`} />
                 {activeReasoningMessage?.streaming ? 'Live backend activity' : 'Final backend activity'}
@@ -933,16 +938,16 @@ export default function ToolPlaygroundPage() {
               <div className="mt-2 font-medium">
                 {activeReasoningMessage.processing_logs[activeReasoningMessage.processing_logs.length - 1]?.label}
               </div>
-              <div className="mt-1 leading-6 text-[#c0d8e6]">
+              <div className="mt-1 leading-6 text-muted">
                 {activeReasoningMessage.processing_logs[activeReasoningMessage.processing_logs.length - 1]?.detail}
               </div>
             </div>
           )}
           <div className="mt-5 max-h-[60vh] space-y-3 overflow-y-auto pr-1">
             {(activeReasoningMessage?.processing_logs || []).map((log, index) => (
-              <div key={log.step_id || `${log.label}-${index}`} className="rounded-2xl border border-white/10 bg-[#0a1020]/80 px-4 py-4">
+              <div key={log.step_id || `${log.label}-${index}`} className="rounded-2xl border border-white/10 bg-panel/80 px-4 py-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{log.label}</div>
-                <div className="mt-2 leading-6 text-[#d1dcef]">{log.detail}</div>
+                <div className="mt-2 leading-6 text-ink">{log.detail}</div>
               </div>
             ))}
             {!(activeReasoningMessage?.processing_logs || []).length && (
@@ -962,7 +967,7 @@ export default function ToolPlaygroundPage() {
         width="max-w-3xl"
       >
         {activeCitation && (
-          <div className="bg-[radial-gradient(circle_at_top,rgba(0,213,255,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] p-6">
+          <div className="bg-elev/70 p-6">
             {activeCitation.url && (
               <a
                 href={activeCitation.url}

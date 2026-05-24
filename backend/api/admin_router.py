@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 
 from core.request_context import require_admin
+from db.collection_names import AIGERS_DOCUMENTS
 from db.mongo_client import get_db
 
 router = APIRouter()
@@ -20,7 +21,7 @@ async def overview(request: Request):
             "agents": await db.agents.count_documents({"status": "active"}),
             "workflows": await db.workflow_definitions.count_documents({}),
             "runs": await db.workflow_runs.count_documents({}),
-            "documents": await db.documents.count_documents({}),
+            "documents": await db[AIGERS_DOCUMENTS].count_documents({"deleted_at": None}),
             "pending_hitl": await db.hitl_records.count_documents({"status": "pending"}),
         },
         "recent_users": users,
