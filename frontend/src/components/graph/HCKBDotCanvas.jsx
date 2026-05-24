@@ -270,7 +270,11 @@ export default function HCKBDotCanvas({
     // interactions
     const dom = renderer.domElement;
     function onPointerDown(e) {
-      state.dragging = true; state.lastMouse.x = e.clientX; state.lastMouse.y = e.clientY;
+      // If we start dragging, prevent click/hover from targeting objects under the cursor.
+      state.dragging = true
+      state.lastMouse.x = e.clientX
+      state.lastMouse.y = e.clientY
+      state.didDrag = false
     }
     function onPointerMove(e) {
       const rect = dom.getBoundingClientRect();
@@ -280,6 +284,7 @@ export default function HCKBDotCanvas({
       if (state.dragging) {
         const dx = e.clientX - state.lastMouse.x;
         const dy = e.clientY - state.lastMouse.y;
+        if (Math.abs(dx) + Math.abs(dy) > 3) state.didDrag = true
         state.rotation.y += dx * 0.0022;
         state.rotation.x += dy * 0.0022;
         state.lastMouse.x = e.clientX; state.lastMouse.y = e.clientY;
@@ -287,6 +292,7 @@ export default function HCKBDotCanvas({
         onNodeHover(null);
         return;
       }
+
 
       if (state.showAllChunks) {
         hideTransientLabels();
@@ -509,7 +515,11 @@ export default function HCKBDotCanvas({
         if (meta && meta.node) { animateCameraTo(meta.node, false, false); onNodeClick(meta.node); highlightDocId(meta.node.docId); }
       }
     }
-    dom.addEventListener("click", onClick);
+    dom.addEventListener("click", (e) => {
+      // If the interaction was a drag/rotate gesture, ignore click so we don't accidentally select/warp.
+      if (stateRef.current?.didDrag) return;
+      onClick(e);
+    });
 
     // periodic eruptions (kept)
     function spawnEruptionFrom(nodeEntry) {
