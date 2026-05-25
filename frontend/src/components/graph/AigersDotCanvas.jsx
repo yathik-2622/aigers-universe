@@ -26,7 +26,12 @@ import styles from "./AigersKGComponents.module.css";
  */
 export default function HCKBDotCanvas({
   nodes = [],
+  links = [],
+  selectedNodeId = null,
+  relatedNodeIds = [],
+  relatedLinkIds = [],
   focusDocId = null,
+  focusNodeId = null,
   onNodeClick = () => {},
   onNodeHover = () => {},
   warpToNodeId = null,
@@ -41,6 +46,25 @@ export default function HCKBDotCanvas({
   const timeRef = useRef(0);
 
   const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const stableHash = (value = "") => {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+    return hash >>> 0;
+  };
+  const neonColorForLink = (link, highlighted = false) => {
+    const semantic = (link.edge_type || "") === "semantic";
+    if (highlighted) return semantic ? 0x67e8f9 : 0xfacc15;
+    if (semantic) {
+      const score = Math.max(0, Math.min(1, Number(link.similarity ?? 0)));
+      const hue = 185 + Math.round(score * 110);
+      const color = new THREE.Color();
+      color.setHSL(hue / 360, 0.96, 0.62);
+      return color.getHex();
+    }
+    const color = new THREE.Color();
+    color.setHSL((stableHash(String(link.id || "")) % 360) / 360, 0.72, 0.58);
+    return color.getHex();
+  };
 
   // star texture: solid core + optional soft gradient overlay (keeps core crisp)
   function makeStarTexture(color = "#ffffff", size = 128, glow = 0) {
@@ -133,6 +157,11 @@ export default function HCKBDotCanvas({
     return tex;
   }
 
+  function framingDistance(camera, radius = 180) {
+    const fov = THREE.MathUtils.degToRad(camera.fov || 50);
+    return Math.max(520, (radius * 1.9) / Math.tan(fov / 2));
+  }
+
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
@@ -165,7 +194,7 @@ export default function HCKBDotCanvas({
 
     const state = {
       renderer, scene, camera, composer, raycaster,
-      spritesMap: {}, instancedInfo: null,
+      spritesMap: {}, instancedInfo: null, linkObjects: [],
       eruptionParticles: [], rotation: { x: 0, y: 0 },
       dragging: false, lastMouse: { x: 0, y: 0 }, anim: null,
       showAllChunks: !!showAllChunks, _fitTarget: null,
@@ -255,6 +284,31 @@ export default function HCKBDotCanvas({
       g.visible = false;
       scene.add(g);
       state.blackhole = { group: g, disk, accMat };
+    })();
+
+    (function createAmbientStarfield() {
+      const count = 1400;
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      for (let index = 0; index < count; index += 1) {
+        const radius = 5200 + Math.random() * 5200;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        positions[index * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        positions[index * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+        positions[index * 3 + 2] = radius * Math.cos(phi);
+        const color = new THREE.Color().setHSL(0.55 + Math.random() * 0.12, 0.4, 0.72 + Math.random() * 0.16);
+        colors[index * 3] = color.r;
+        colors[index * 3 + 1] = color.g;
+        colors[index * 3 + 2] = color.b;
+      }
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      const material = new THREE.PointsMaterial({ size: 8, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.6, depthWrite: false });
+      const points = new THREE.Points(geometry, material);
+      scene.add(points);
+      state.ambientStars = points;
     })();
 
     // resize
@@ -356,7 +410,10 @@ export default function HCKBDotCanvas({
         const bh = state.blackhole;
         if (bh.group.visible) { bh.disk.rotation.z += dt * 0.08; }
       }
-
+      if (state.ambientStars) {
+        state.ambientStars.rotation.y += dt * 0.0035;
+        state.ambientStars.rotation.x += dt * 0.0012;
+      }
       if (state.instancedInfo && state.instancedInfo.mesh) {
         const mesh = state.instancedInfo.mesh;
         const tmp = new THREE.Object3D();
@@ -455,9 +512,8 @@ export default function HCKBDotCanvas({
     function animateCameraTo(node, fast = false, warp = false) {
       const start = camera.position.clone();
       const target = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
-      const dist = node.type === "main" ? 700 : node.type === "sub" ? 420 : 180;
-      const dir = new THREE.Vector3().subVectors(start, target).normalize();
-      const end = new THREE.Vector3().addVectors(target, dir.multiplyScalar(dist));
+      const radius = node.type === "main" ? 260 : node.type === "sub" ? 170 : 108;
+      const end = new THREE.Vector3(target.x, target.y, target.z + framingDistance(camera, radius));
       const dur = fast ? 420 : 820;
       const t0 = performance.now();
 
@@ -491,6 +547,28 @@ export default function HCKBDotCanvas({
       }
     }
 
+    function highlightNodeNeighbors(nodeId) {
+      const id = String(nodeId || "");
+      const relatedNodes = new Set([id, ...((relatedNodeIds || []).map((item) => String(item)))]);
+      const activeLinks = new Set((relatedLinkIds || []).map((item) => String(item)));
+      Object.values(state.spritesMap || {}).forEach((entry) => {
+        const entryId = String(entry.meta?.node?.id || "");
+        const isHighlighted = relatedNodes.has(entryId);
+        entry.meta.highlight = isHighlighted;
+        entry.star.material.opacity = isHighlighted ? 1.0 : (id ? 0.16 : 1.0);
+        const scale = isHighlighted ? entry.baseScale * (entryId === id ? 1.9 : 1.4) : entry.baseScale;
+        entry.star.scale.set(scale, scale, 1);
+        if (id) {
+          entry.label.visible = isHighlighted || entry.meta.node.type === "main";
+        }
+      });
+      (state.linkObjects || []).forEach((record) => {
+        const isActive = !id || activeLinks.has(String(record.id));
+        record.line.material.opacity = isActive ? (record.edgeType === "semantic" ? 0.98 : 0.8) : 0.06;
+        record.line.material.color.set(isActive ? record.baseColor : 0x334155);
+      });
+    }
+
     function onClick(e) {
       const rect = dom.getBoundingClientRect();
       const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -503,7 +581,7 @@ export default function HCKBDotCanvas({
           const inst = ints[0];
           const iid = inst.instanceId;
           const node = state.instancedInfo.nodes[iid];
-          if (node) { animateCameraTo(node, false, false); onNodeClick(node); highlightDocId(node.docId); return; }
+          if (node) { animateCameraTo(node, false, false); onNodeClick(node); highlightNodeNeighbors(node.id); if (node.docId) highlightDocId(node.docId); return; }
         }
       }
 
@@ -512,14 +590,15 @@ export default function HCKBDotCanvas({
       if (ints2.length > 0) {
         const sprite = ints2[0].object;
         const meta = sprite.userData.__meta;
-        if (meta && meta.node) { animateCameraTo(meta.node, false, false); onNodeClick(meta.node); highlightDocId(meta.node.docId); }
+        if (meta && meta.node) { animateCameraTo(meta.node, false, false); onNodeClick(meta.node); highlightNodeNeighbors(meta.node.id); if (meta.node.docId) highlightDocId(meta.node.docId); }
       }
     }
-    dom.addEventListener("click", (e) => {
+    const handleCanvasClick = (e) => {
       // If the interaction was a drag/rotate gesture, ignore click so we don't accidentally select/warp.
       if (stateRef.current?.didDrag) return;
       onClick(e);
-    });
+    };
+    dom.addEventListener("click", handleCanvasClick);
 
     // periodic eruptions (kept)
     function spawnEruptionFrom(nodeEntry) {
@@ -619,7 +698,7 @@ export default function HCKBDotCanvas({
       dom.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
-      dom.removeEventListener("click", onClick);
+      dom.removeEventListener("click", handleCanvasClick);
       dom.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
       clearInterval(eruptionIntervalRef.current);
@@ -634,8 +713,27 @@ export default function HCKBDotCanvas({
           state.instancedInfo.mesh.geometry.dispose();
           state.instancedInfo.mesh.material.dispose();
         }
+        (state.linkObjects || []).forEach((record) => {
+          state.scene.remove(record.line);
+          if (record.line.geometry) record.line.geometry.dispose();
+          if (record.line.material) record.line.material.dispose();
+        });
         if (state.distantGalaxies) {
           state.distantGalaxies.children.forEach((g) => { g.children.forEach((p) => { if (p.geometry) p.geometry.dispose(); if (p.material) p.material.dispose(); }); state.scene.remove(g); });
+        }
+        if (state.ambientStars) {
+          state.scene.remove(state.ambientStars);
+          state.ambientStars.geometry.dispose();
+          state.ambientStars.material.dispose();
+        }
+        if (state.ambientPlanets) {
+          state.ambientPlanets.children.forEach((planet) => {
+            planet.children.forEach((child) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) child.material.dispose();
+            });
+          });
+          state.scene.remove(state.ambientPlanets);
         }
         if (state.blackhole && state.blackhole.group) {
           state.scene.remove(state.blackhole.group);
@@ -771,6 +869,42 @@ export default function HCKBDotCanvas({
       }
     });
 
+    (s.linkObjects || []).forEach((record) => {
+      try {
+        scene.remove(record.line);
+        record.line.geometry.dispose();
+        record.line.material.dispose();
+      } catch (e) {}
+    });
+    s.linkObjects = [];
+
+    const positionsById = new Map();
+    [...mainNodes, ...subNodes, ...chunkNodes].forEach((node) => {
+      positionsById.set(String(node.id), new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0));
+    });
+    (links || []).forEach((link) => {
+      const sourceId = String((typeof link.source === "string" ? link.source : link.source?.id) || "");
+      const targetId = String((typeof link.target === "string" ? link.target : link.target?.id) || "");
+      const source = positionsById.get(sourceId);
+      const target = positionsById.get(targetId);
+      if (!source || !target) return;
+      const geometry = new THREE.BufferGeometry().setFromPoints([source, target]);
+      const semantic = (link.edge_type || "") === "semantic";
+      const highlighted = selectedNodeId && (relatedLinkIds || []).map((item) => String(item)).includes(String(link.id || `${sourceId}->${targetId}`));
+      const baseColor = neonColorForLink(link, !!highlighted);
+      const material = new THREE.LineBasicMaterial({
+        color: baseColor,
+        transparent: true,
+        opacity: selectedNodeId ? (highlighted ? (semantic ? 0.98 : 0.8) : 0.06) : (semantic ? 0.48 : 0.24),
+        blending: THREE.AdditiveBlending,
+      });
+      material.toneMapped = false;
+      const line = new THREE.Line(geometry, material);
+      line.renderOrder = semantic ? 2 : 0;
+      scene.add(line);
+      s.linkObjects.push({ id: String(link.id || `${sourceId}->${targetId}`), edgeType: semantic ? "semantic" : "structural", baseColor, line });
+    });
+
     // showAllChunks behavior & fit
     if (s.showAllChunks) {
       const chunkEntries = Object.values(s.spritesMap).filter(e => e.meta && e.meta.node && e.meta.node.type === "chunk");
@@ -806,7 +940,7 @@ export default function HCKBDotCanvas({
     }
 
     stateRef.current = s;
-  }, [nodes, showAllChunks, starGlow, labelConfigs]);
+  }, [nodes, links, selectedNodeId, relatedNodeIds, relatedLinkIds, showAllChunks, starGlow, labelConfigs]);
 
   // fit camera when _fitTarget is set (showAllChunks or fitSelection)
   useEffect(() => {
@@ -842,9 +976,7 @@ export default function HCKBDotCanvas({
       const cam = s.camera;
       const start = cam.position.clone();
       const target = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
-      const dir = new THREE.Vector3().subVectors(start, target).normalize();
-      const dist = 180; // stop right before chunk
-      const end = new THREE.Vector3().addVectors(target, dir.multiplyScalar(dist));
+      const end = new THREE.Vector3(target.x, target.y, target.z + framingDistance(cam, 108));
       const dur = 900;
       const t0 = performance.now();
       (function tick() {
@@ -878,7 +1010,7 @@ export default function HCKBDotCanvas({
         const cam = s.camera;
         const start = cam.position.clone();
         const target = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
-        const end = new THREE.Vector3().addVectors(target, new THREE.Vector3(0, 0, 180));
+        const end = new THREE.Vector3(target.x, target.y, target.z + framingDistance(cam, 108));
         const dur = 850;
         const t0 = performance.now();
         (function tick() {
@@ -892,6 +1024,29 @@ export default function HCKBDotCanvas({
       }
     }
   }, [focusDocId]);
+
+  useEffect(() => {
+    const s = stateRef.current;
+    if (!s || !focusNodeId) return;
+    const matchEntry = Object.values(s.spritesMap || {}).find((entry) => String(entry.meta?.node?.id || "") === String(focusNodeId));
+    if (matchEntry?.meta?.node) {
+      const node = matchEntry.meta.node;
+      const target = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
+      const cam = s.camera;
+      const start = cam.position.clone();
+      const radius = node.type === "main" ? 260 : node.type === "sub" ? 170 : 108;
+      const end = new THREE.Vector3(target.x, target.y, target.z + framingDistance(cam, radius));
+      const t0 = performance.now();
+      const dur = 720;
+      (function tick() {
+        const t = (performance.now() - t0) / dur;
+        const a = Math.min(1, t);
+        cam.position.lerpVectors(start, end, easeInOutCubic(a));
+        cam.lookAt(target);
+        if (a < 1) requestAnimationFrame(tick);
+      })();
+    }
+  }, [focusNodeId]);
 
   // warpToNodeId dramatic warp (keeps existing behavior; distances reduced)
   useEffect(() => {

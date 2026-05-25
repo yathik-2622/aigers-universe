@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Briefcase, Cpu, Database, Hexagon, LayoutDashboard, LogOut, Orbit, Settings, ShieldCheck, Store, UserCog, Workflow, Wrench } from 'lucide-react'
+import { Activity, BookOpenText, Briefcase, Cpu, Database, Hexagon, LayoutDashboard, LogOut, Orbit, Settings, ShieldCheck, Store, UserCog, Workflow, Wrench } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 export default function Sidebar() {
@@ -21,6 +21,7 @@ export default function Sidebar() {
       { to: '/knowledge-graph', label: 'Knowledge Graph', icon: Orbit, id: 'knowledge-graph' },
       { to: '/hitl', label: 'HITL Approvals', icon: ShieldCheck, id: 'hitl' },
       { to: '/observability', label: 'Observability', icon: Activity, id: 'observability' },
+      { to: '/platform-docs', label: 'Platform Docs', icon: BookOpenText, id: 'platform-docs' },
     ]
     if (user?.role === 'admin') items.push({ to: '/admin', label: 'Admin View', icon: UserCog, id: 'admin' })
     return items

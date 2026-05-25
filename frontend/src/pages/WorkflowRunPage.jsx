@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ReactFlowProvider } from 'reactflow'
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, FileText, LoaderCircle, MessageSquare, PauseCircle, Radio, RefreshCcw, Square } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Copy, FileText, LoaderCircle, MessageSquare, PauseCircle, Radio, RefreshCcw, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
+import { fetchCitationSource } from '../api/toolChat.js'
 import { getRun, getRunReport, pauseRun, resumeRun, stopRun } from '../api/workflows.js'
 import { useTitle } from '../context/TitleContext.jsx'
 
@@ -21,6 +22,8 @@ export default function WorkflowRunPage() {
   const [pausePending, setPausePending] = useState(false)
   const [stopPending, setStopPending] = useState(false)
   const [activeCitation, setActiveCitation] = useState(null)
+  const [activeCitationContent, setActiveCitationContent] = useState(null)
+  const [loadingCitationContent, setLoadingCitationContent] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
   const [expandedMessageId, setExpandedMessageId] = useState('')
   const [focusedNodeId, setFocusedNodeId] = useState('')
@@ -203,6 +206,36 @@ export default function WorkflowRunPage() {
       if (timer) clearTimeout(timer)
     }
   }, [run?.status, run?.report_markdown, runId])
+
+  useEffect(() => {
+    let mounted = true
+    if (!activeCitation?.content_url) {
+      setActiveCitationContent(null)
+      setLoadingCitationContent(false)
+      return () => { mounted = false }
+    }
+    setLoadingCitationContent(true)
+    fetchCitationSource(activeCitation.content_url)
+      .then((payload) => {
+        if (mounted) setActiveCitationContent(payload)
+      })
+      .catch(() => {
+        if (mounted) setActiveCitationContent(null)
+      })
+      .finally(() => {
+        if (mounted) setLoadingCitationContent(false)
+      })
+    return () => { mounted = false }
+  }, [activeCitation])
+
+  const copyText = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value || '')
+      toast.success('Copied')
+    } catch {
+      toast.error('Copy failed')
+    }
+  }
 
   const nodes = (run?.agents || []).map((a, idx) => {
     const result = (run?.agent_results || []).find((r) => r.agent_id === a.agent_id)
@@ -468,8 +501,31 @@ export default function WorkflowRunPage() {
               <div className="font-display text-lg">{activeCitation.label || 'Citation'}</div>
               <button onClick={() => setActiveCitation(null)} className="text-muted hover:text-ink text-sm">Close</button>
             </div>
-            <div className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{activeCitation.excerpt || 'No excerpt provided.'}</div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button onClick={() => copyText(activeCitation.excerpt || '')} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted hover:border-accent/30 hover:text-ink">
+                <Copy size={12} />
+                Copy excerpt
+              </button>
+              <button onClick={() => copyText(activeCitationContent?.content || '')} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted hover:border-accent/30 hover:text-ink">
+                <Copy size={12} />
+                Copy opened source
+              </button>
+            </div>
+            <MarkdownReport markdown={activeCitation.excerpt || 'No excerpt provided.'} />
             <div className="mt-4 text-[12px] text-muted">Source: {activeCitation.source_type || 'reference'} {activeCitation.source_ref ? `| ${activeCitation.source_ref}` : ''}</div>
+            <div className="mt-5 rounded-2xl border border-white/10 bg-panel/70 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Opened source</div>
+              <div className="mt-3">
+                {loadingCitationContent ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-muted">
+                    <LoaderCircle size={14} className="animate-spin text-accent" />
+                    Loading source content...
+                  </div>
+                ) : (
+                  <MarkdownReport markdown={activeCitationContent?.content || 'No additional source content available.'} />
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

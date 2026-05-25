@@ -1,19 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { BookOpenText, FileStack, FolderPlus, FolderSearch2, Globe2, LockKeyhole, RefreshCcw, Rocket, Trash2, UploadCloud } from 'lucide-react'
+import { BookOpenText, FileStack, FolderPlus, FolderSearch2, Globe2, LockKeyhole, RefreshCcw, Rocket, Trash2, UploadCloud, X } from 'lucide-react'
 import CustomSelect from '../components/common/CustomSelect.jsx'
 import {
   createDocumentCategory,
   deleteDocument,
   ingestDocuments,
+  importGithubRepo,
   listChunkingStrategies,
   listDocumentCategories,
   listDocuments,
+  updateDocumentVisibility,
   uploadDocumentsMany,
 } from '../api/documents.js'
 
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase()
+}
+
+function duplicateMessage(item) {
+  switch (item?.duplicate_reason) {
+    case 'same_owner_same_visibility':
+      return 'You already uploaded this same content with the same visibility.'
+    case 'same_owner_private_to_public':
+      return 'You already uploaded this as private. Make the existing file public instead of reuploading.'
+    case 'public_duplicate_same_owner':
+      return 'You already uploaded this as a public knowledge-base file.'
+    case 'public_duplicate_other_owner':
+      return 'This content already exists as a public knowledge-base file.'
+    case 'public_available_use_existing':
+      return 'This content already exists publicly. Use the public file instead of uploading a private copy.'
+    default:
+      return 'This file content already exists in the knowledge base.'
+  }
 }
 
 export default function KnowledgeBasePage() {
@@ -27,6 +46,11 @@ export default function KnowledgeBasePage() {
   const [ingesting, setIngesting] = useState(false)
   const [addingCategory, setAddingCategory] = useState(false)
   const [deletingId, setDeletingId] = useState('')
+  const [visibilityUpdatingId, setVisibilityUpdatingId] = useState('')
+  const [uploadNotices, setUploadNotices] = useState([])
+  const [highlightedDocumentId, setHighlightedDocumentId] = useState('')
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoImporting, setRepoImporting] = useState(false)
   const [filters, setFilters] = useState({ category: '', sub_category: '', visibility: '', status_filter: '' })
   const [uploadForm, setUploadForm] = useState({
     category: 'general',
@@ -191,6 +215,14 @@ export default function KnowledgeBasePage() {
     ))
   }
 
+  const removeSelectedFile = (targetFile) => {
+    setSelectedFiles((current) => current.filter((file) => !(file.name === targetFile.name && file.size === targetFile.size && file.lastModified === targetFile.lastModified)))
+  }
+
+  const clearSelectedFiles = () => {
+    setSelectedFiles([])
+  }
+
   const handleCreateCategory = async () => {
     const main = normalizeName(createCategoryForm.main_category || uploadForm.category)
     const sub = normalizeName(createCategoryForm.sub_category)
@@ -222,14 +254,107 @@ export default function KnowledgeBasePage() {
       const result = await uploadDocumentsMany(selectedFiles, uploadForm)
       const successful = (result.documents || []).filter((item) => !item.error)
       const failed = (result.documents || []).filter((item) => item.error)
-      toast.success(`Uploaded ${successful.length} file(s)${failed.length ? `, ${failed.length} failed` : ''}`)
+      const duplicates = successful.filter((item) => item.duplicate)
+      const created = successful.filter((item) => !item.duplicate)
+      setUploadNotices(duplicates)
+      setHighlightedDocumentId(duplicates[0]?.existing_document?.document_id || '')
+      toast.success(`Uploaded ${created.length} file(s)${duplicates.length ? `, ${duplicates.length} duplicate` : ''}${failed.length ? `, ${failed.length} failed` : ''}`)
       setSelectedFiles([])
-      setSelectedDocumentIds((current) => current.concat(successful.map((item) => item.document_id)).filter(Boolean))
+      setSelectedDocumentIds((current) => current.concat(created.map((item) => item.document_id)).filter(Boolean))
       await load()
     } catch (error) {
       toast.error(error?.response?.data?.detail || 'Upload failed')
     } finally {
       setUploading(false)
+    }
+  }
+
+  const uploadSelectedFiles = async () => {
+    if (!selectedFiles.length) return []
+    const result = await uploadDocumentsMany(selectedFiles, uploadForm)
+    const successful = (result.documents || []).filter((item) => !item.error)
+    const failed = (result.documents || []).filter((item) => item.error)
+    const duplicates = successful.filter((item) => item.duplicate)
+    const created = successful.filter((item) => !item.duplicate)
+    setUploadNotices(duplicates)
+    setHighlightedDocumentId(duplicates[0]?.existing_document?.document_id || created[0]?.document_id || '')
+    if (failed.length) {
+      toast.error(`${failed.length} file upload${failed.length === 1 ? '' : 's'} failed`)
+    }
+    return created.map((item) => item.document_id).filter(Boolean)
+  }
+
+  const importSelectedRepo = async () => {
+    if (!repoUrl.trim()) return null
+    const imported = await importGithubRepo(repoUrl.trim(), uploadForm.category, uploadForm)
+    setHighlightedDocumentId(imported.document_id)
+    return imported
+  }
+
+  const handlePrimaryIngestAction = async () => {
+    const hasFiles = selectedFiles.length > 0
+    const hasRepo = !!repoUrl.trim()
+    if (!hasFiles && !hasRepo) {
+      toast.error('Choose files, a GitHub repo, or both')
+      return
+    }
+    setUploading(true)
+    if (hasRepo) setRepoImporting(true)
+    try {
+      const createdFileIds = hasFiles ? await uploadSelectedFiles() : []
+      let importedRepo = null
+      if (hasRepo) importedRepo = await importSelectedRepo()
+      if (createdFileIds.length) {
+        setIngesting(true)
+        await ingestDocuments(createdFileIds)
+      }
+      const summary = [
+        hasFiles ? `${createdFileIds.length} file${createdFileIds.length === 1 ? '' : 's'} uploaded` : '',
+        hasFiles && createdFileIds.length ? `${createdFileIds.length} file${createdFileIds.length === 1 ? '' : 's'} queued for embedding` : '',
+        importedRepo ? `repo imported with ${importedRepo.files_indexed || 0} files` : '',
+      ].filter(Boolean).join(' | ')
+      toast.success(summary || 'Knowledge sources processed')
+      setSelectedFiles([])
+      setRepoUrl('')
+      setSelectedDocumentIds((current) => current.concat(createdFileIds, importedRepo?.document_id || []).filter(Boolean))
+      await load(filters)
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Knowledge source processing failed')
+    } finally {
+      setUploading(false)
+      setRepoImporting(false)
+      setIngesting(false)
+    }
+  }
+
+  const handleMakePublic = async (documentId) => {
+    if (!documentId) return
+    setVisibilityUpdatingId(documentId)
+    try {
+      await updateDocumentVisibility(documentId, 'public')
+      toast.success('Existing file is now public')
+      await load(filters)
+      setHighlightedDocumentId(documentId)
+      setUploadNotices((current) => current.filter((item) => item.existing_document?.document_id !== documentId))
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Failed to update visibility')
+    } finally {
+      setVisibilityUpdatingId('')
+    }
+  }
+
+  const handleToggleVisibility = async (doc) => {
+    const nextVisibility = doc.visibility === 'public' ? 'private' : 'public'
+    setVisibilityUpdatingId(doc.document_id)
+    try {
+      await updateDocumentVisibility(doc.document_id, nextVisibility)
+      toast.success(`File marked ${nextVisibility}`)
+      await load(filters)
+      setHighlightedDocumentId(doc.document_id)
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Visibility update failed')
+    } finally {
+      setVisibilityUpdatingId('')
     }
   }
 
@@ -265,6 +390,16 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const hasUploadFiles = selectedFiles.length > 0
+  const hasRepoInput = !!repoUrl.trim()
+  const primaryUploadLabel = hasUploadFiles && hasRepoInput
+    ? 'Upload and ingest repo + files'
+    : hasUploadFiles
+      ? `Upload ${selectedFiles.length} file(s)`
+      : hasRepoInput
+        ? 'Ingest repo'
+        : 'Upload files'
+
   return (
     <div className="p-6 xl:p-8 max-w-[1680px] space-y-5">
       <section className="rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.16),transparent_28%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.16),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] px-6 py-7 shadow-[0_28px_90px_rgba(0,0,0,0.2)]">
@@ -293,12 +428,46 @@ export default function KnowledgeBasePage() {
           <section className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
             <div className="flex items-center gap-2 text-sm font-medium text-ink"><UploadCloud size={15} className="text-cyan-300" /> Upload raw documents</div>
             <div className="mt-4 space-y-3">
+              {uploadNotices.length > 0 && (
+                <div className="space-y-2">
+                  {uploadNotices.map((item) => (
+                    <div key={`${item.filename}-${item.existing_document?.document_id || 'duplicate'}`} className="rounded-[22px] border border-amber-300/20 bg-amber-300/[0.08] px-4 py-3 text-sm text-amber-50">
+                      <div className="font-medium">{item.filename}</div>
+                      <div className="mt-1 text-xs leading-5 text-amber-100/90">{duplicateMessage(item)}</div>
+                      {item.existing_document && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <button type="button" onClick={() => setHighlightedDocumentId(item.existing_document.document_id)} className="rounded-full border border-amber-200/25 bg-white/[0.06] px-3 py-1.5 text-amber-50">
+                            Highlight existing file
+                          </button>
+                          {item.visibility_change_suggested && (
+                            <button type="button" onClick={() => handleMakePublic(item.existing_document.document_id)} disabled={visibilityUpdatingId === item.existing_document.document_id} className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-cyan-100 disabled:opacity-50">
+                              {visibilityUpdatingId === item.existing_document.document_id ? 'Updating...' : 'Make existing file public'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <input
                 type="file"
                 multiple
                 onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
                 className="block w-full rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-3 py-5 text-sm text-muted file:mr-3 file:rounded-full file:border-0 file:bg-cyan-300 file:px-3 file:py-2 file:text-xs file:font-medium file:text-slate-950"
               />
+              <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted"><Globe2 size={13} /> Import GitHub repo</div>
+                <div className="mt-3 space-y-3">
+                  <input
+                    value={repoUrl}
+                    onChange={(event) => setRepoUrl(event.target.value)}
+                    placeholder="https://github.com/org/repo"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-ink outline-none transition focus:border-cyan-300/40"
+                  />
+                  <div className="text-[11px] text-muted">The category, subcategory, visibility, and chunking options below apply to both files and repo ingest.</div>
+                </div>
+              </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
@@ -344,8 +513,8 @@ export default function KnowledgeBasePage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <button onClick={handleUpload} disabled={uploading} className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:opacity-90 disabled:opacity-50">
-                  <UploadCloud size={14} /> {uploading ? 'Uploading...' : `Upload ${selectedFiles.length ? `${selectedFiles.length} file(s)` : 'files'}`}
+                <button onClick={handlePrimaryIngestAction} disabled={uploading || repoImporting || ingesting || (!hasUploadFiles && !hasRepoInput)} className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:opacity-90 disabled:opacity-50">
+                  <UploadCloud size={14} /> {uploading || repoImporting ? 'Processing...' : primaryUploadLabel}
                 </button>
                   <button onClick={() => handleIngest()} disabled={ingesting || !queuedForEmbed.length || selectedDocumentIds.length === 0} className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-5 py-3 text-sm font-medium text-emerald-100 transition hover:border-emerald-300/40 disabled:opacity-50">
                   <Rocket size={14} /> {ingesting ? 'Embedding...' : `Embed ${queuedForEmbed.length ? queuedForEmbed.length : 'selected'}`}
@@ -354,8 +523,33 @@ export default function KnowledgeBasePage() {
               </div>
 
               {selectedFiles.length ? (
-                <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-muted">
-                  {selectedFiles.map((file) => file.name).join(', ')}
+                <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Chosen files</div>
+                    <button
+                      type="button"
+                      onClick={clearSelectedFiles}
+                      className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] text-muted transition hover:border-rose-300/35 hover:text-rose-100"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedFiles.map((file) => (
+                      <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex max-w-full items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs text-cyan-100">
+                        <span className="max-w-[220px] truncate">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeSelectedFile(file)}
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-cyan-200/25 bg-white/[0.06] text-cyan-50 transition hover:border-rose-300/35 hover:text-rose-100"
+                          aria-label={`Remove ${file.name}`}
+                          title={`Remove ${file.name}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -421,7 +615,7 @@ export default function KnowledgeBasePage() {
               {documents.map((doc) => {
                 const selected = selectedDocumentIds.includes(doc.document_id)
                 return (
-                  <div key={doc.document_id} className={`rounded-[24px] border p-4 transition ${selected ? 'border-cyan-300/30 bg-cyan-300/[0.08]' : 'border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]'}`}>
+                  <div key={doc.document_id} className={`rounded-[24px] border p-4 transition ${highlightedDocumentId === doc.document_id ? 'border-amber-300/35 bg-amber-300/[0.09]' : selected ? 'border-cyan-300/30 bg-cyan-300/[0.08]' : 'border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))]'}`}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="flex min-w-0 gap-3">
                         <input
@@ -534,6 +728,14 @@ export default function KnowledgeBasePage() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => handleToggleVisibility(doc)}
+                          disabled={visibilityUpdatingId === doc.document_id || doc.status === 'embedding'}
+                          className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-300/10 px-4 py-2 text-xs text-sky-100 disabled:opacity-50"
+                        >
+                          {doc.visibility === 'public' ? <LockKeyhole size={13} /> : <Globe2 size={13} />}
+                          {doc.visibility === 'public' ? 'Make private' : 'Make public'}
+                        </button>
                         <button
                           onClick={() => handleIngest([doc.document_id])}
                           disabled={ingesting || doc.status === 'embedding' || doc.status === 'embedded'}

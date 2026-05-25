@@ -15,6 +15,7 @@ import MarketplacePage from './pages/MarketplacePage.jsx'
 import ObservabilityPage from './pages/ObservabilityPage.jsx'
 import KnowledgeBasePage from './pages/KnowledgeBasePage.jsx'
 import KnowledgeGraphPage from './pages/KnowledgeGraphPage.jsx'
+import PlatformDocumentationPage from './pages/PlatformDocumentationPage.jsx'
 import ProjectsPage from './pages/ProjectsPage.jsx'
 import ToolPlaygroundPage from './pages/ToolPlaygroundPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
@@ -43,6 +44,7 @@ function ProtectedShell() {
               <Route path="/builder/:workflowId" element={<WorkflowBuilderPage />} />
               <Route path="/tools-chat" element={<ToolPlaygroundPage />} />
               <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
+              <Route path="/platform-docs" element={<PlatformDocumentationPage />} />
               <Route path="/runs/:runId" element={<WorkflowRunPage />} />
               <Route path="/hitl" element={<HITLPage />} />
               <Route path="/observability" element={<ObservabilityPage />} />

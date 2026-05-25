@@ -165,16 +165,19 @@ Expected:
 - uploaded files appear in workflow input list
 - imported repo appears separately
 - workflow inputs do not merge into KB
+- if files are selected by mistake, individual files can be removed before upload
 
 ### Reusable KB
 
 1. In `Knowledge base`, upload one reusable architecture or policy document.
 2. Switch KB mode to GitHub and import a separate repo into KB.
+3. Upload a duplicate public file and verify the page highlights the existing record instead of showing a browser alert.
 
 Expected:
 
 - KB items remain separate from workflow inputs
 - KB list updates correctly
+- duplicate guidance is friendly and visibility-aware
 
 ---
 
@@ -196,6 +199,20 @@ Expected:
 - node configuration persists
 - workflow saves successfully
 - node state reflects edits
+
+## 4.6.1 Orchestrator market-research and activity stream
+
+1. In `Workflow Builder`, use a broad commercial prompt such as:
+
+   `Design an agentic modernization workflow for a regulated Java platform, assess whether the use case is commercially viable, and prepare reusable prompts plus a staged delivery architecture.`
+
+2. Click `Auto-build workflow`.
+3. Watch the transparent orchestrator activity stream on the canvas.
+4. Open the planner modal and verify:
+   - market readiness signal
+   - live market research findings when tools are available
+   - planner citations
+   - suggested custom agent drafts when inventory coverage is incomplete
 
 ---
 
@@ -284,17 +301,27 @@ Expected:
    - suggested workflow steps
 6. Change model and preferred tool.
 7. Attach 2 to 3 files and ask a grounded follow-up.
-8. Start another chat in `General Reasoning` mode.
-9. Reopen chats from history.
-10. Rename one chat.
-11. Delete one chat.
+8. Start another chat in `Knowledgebase RAG` mode and ask:
+
+   `Answer only from grounded sources: what do the latest repo docs and indexed KB say about citations, knowledge base retrieval, and graph visualization?`
+
+9. Confirm the backend trace shows retrieval work such as live doc refresh, retriever execution, or refusal when evidence is missing.
+10. Click at least one citation pill and confirm the modal loads the underlying source content, not only the label.
+11. Ask an intentionally out-of-scope question in `Knowledgebase RAG` mode.
+12. Confirm the assistant politely refuses instead of hallucinating.
+13. Start another chat in `General Reasoning` mode.
+14. Reopen chats from history.
+15. Rename one chat.
+16. Delete one chat.
 
 Expected:
 
 - session persistence works
 - history actions work without overlap
 - platform mode stays grounded in AIger capabilities
-- general mode can answer broader questions
+- knowledge mode shows grounded citations and source opening
+- out-of-scope grounded questions are refused safely
+- general mode stays grounded instead of inventing unsupported facts
 - tool activity appears inline when tools are called
 
 ---

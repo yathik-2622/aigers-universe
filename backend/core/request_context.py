@@ -14,12 +14,18 @@ def _auth_payload(request: Request) -> dict | None:
 
 
 def get_optional_user_id(request: Request) -> str | None:
-    payload = _auth_payload(request)
+    try:
+        payload = _auth_payload(request)
+    except HTTPException:
+        return None
     return payload.get("sub") if payload else None
 
 
 def get_optional_role(request: Request) -> str | None:
-    payload = _auth_payload(request)
+    try:
+        payload = _auth_payload(request)
+    except HTTPException:
+        return None
     return payload.get("role") if payload else None
 
 

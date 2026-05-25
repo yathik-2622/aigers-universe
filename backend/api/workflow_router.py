@@ -309,6 +309,240 @@ def _fallback_step_templates(prompt: str, templates: list[dict]) -> list[str]:
     return ordered[:5]
 
 
+def _infer_goal_type(prompt: str) -> str:
+    prompt_l = _normalized(prompt)
+    if any(term in prompt_l for term in ["modernize", "migration", "legacy", "monolith", "upgrade", "refactor"]):
+        return "modernization"
+    if any(term in prompt_l for term in ["contract", "legal", "clause", "compliance", "privacy", "regulatory"]):
+        return "governance"
+    if any(term in prompt_l for term in ["architecture", "design", "system", "workflow", "orchestrator"]):
+        return "architecture"
+    if any(term in prompt_l for term in ["market", "product", "customer", "roi", "business"]):
+        return "strategy"
+    return "general"
+
+
+def _default_market_signal(prompt: str) -> dict:
+    prompt_l = _normalized(prompt)
+    demand = "moderate"
+    if any(term in prompt_l for term in ["modernize", "migration", "legacy", "automation", "agentic", "workflow"]):
+        demand = "high"
+    if any(term in prompt_l for term in ["experimental", "prototype", "moonshot"]):
+        demand = "uncertain"
+    return {
+        "demand_signal": demand,
+        "evidence_note": "Live market research could not be completed, so this signal falls back to prompt intent plus current AIger inventory coverage.",
+        "truth_note": "Treat this as an orchestration readiness signal unless live market citations are present below.",
+    }
+
+
+def _clip_text(value: str, limit: int = 320) -> str:
+    text = re.sub(r"\s+", " ", (value or "")).strip()
+    return text if len(text) <= limit else f"{text[:limit].rstrip()}..."
+
+
+def _coerce_market_citation(label: str, source_type: str, source_ref: str, excerpt: str, url: str = "") -> dict:
+    return {
+        "label": label,
+        "source_type": source_type,
+        "source_ref": source_ref,
+        "excerpt": _clip_text(excerpt, 420),
+        "url": url,
+    }
+
+
+async def _run_market_research(prompt: str) -> dict:
+    findings: list[dict] = []
+    citations: list[dict] = []
+    source_count = 0
+
+    async def _try_tool(tool_name: str, **kwargs):
+        tool = TOOL_REGISTRY.get(tool_name)
+        if not tool:
+            logger.info("api.workflow.auto_build.market_tool_missing", tool=tool_name)
+            return None
+        try:
+            logger.info("api.workflow.auto_build.market_tool_start", tool=tool_name)
+            result = await tool(**kwargs)
+            logger.info("api.workflow.auto_build.market_tool_complete", tool=tool_name)
+            return result
+        except Exception as exc:
+            logger.warning("api.workflow.auto_build.market_tool_failed", tool=tool_name, error=str(exc))
+            return None
+
+    serp_result = await _try_tool(
+        "serpapi_search",
+        query=f"{prompt[:180]} market size adoption roi enterprise",
+        num=5,
+        location="United States",
+    )
+    if serp_result:
+        for item in (serp_result.get("results") or [])[:3]:
+            title = item.get("title") or item.get("source") or "Market result"
+            snippet = item.get("snippet") or ""
+            link = item.get("link") or ""
+            if not snippet:
+                continue
+            findings.append({"title": title, "summary": _clip_text(snippet), "source_type": "web_search", "url": link})
+            citations.append(_coerce_market_citation(title, "web_search", link or title, snippet, link))
+            source_count += 1
+            if link:
+                page = await _try_tool("webpage_fetch", url=link, max_chars=2400)
+                page_content = (page or {}).get("content") or ""
+                if page_content:
+                    findings.append({
+                        "title": f"{title} detail",
+                        "summary": _clip_text(page_content, 420),
+                        "source_type": "webpage_fetch",
+                        "url": link,
+                    })
+                    citations.append(_coerce_market_citation(f"{title} detail", "webpage_fetch", link, page_content, link))
+                    source_count += 1
+            if source_count >= 4:
+                break
+
+    wiki_result = await _try_tool("wikipedia_search", query=prompt[:160], limit=2)
+    if wiki_result:
+        for item in (wiki_result.get("results") or [])[:2]:
+            description = item.get("description") or ""
+            title = item.get("title") or "Wikipedia"
+            url = item.get("url") or ""
+            if not description:
+                continue
+            findings.append({"title": title, "summary": _clip_text(description), "source_type": "wikipedia", "url": url})
+            citations.append(_coerce_market_citation(title, "wikipedia", url or title, description, url))
+            source_count += 1
+
+    docs_result = await _try_tool("official_docs_search", provider="all", query=prompt[:140], max_results=2)
+    if docs_result:
+        for item in (docs_result.get("results") or [])[:2]:
+            title = item.get("title") or "Official documentation"
+            snippet = item.get("snippet") or ""
+            url = item.get("url") or ""
+            if not snippet:
+                continue
+            findings.append({"title": title, "summary": _clip_text(snippet), "source_type": "official_docs", "url": url})
+            citations.append(_coerce_market_citation(title, "official_docs", url or title, snippet, url))
+            source_count += 1
+
+    findings = findings[:6]
+    citations = citations[:8]
+    if citations:
+        demand_signal = "high" if len(citations) >= 4 else "moderate"
+        return {
+            "demand_signal": demand_signal,
+            "evidence_note": f"Live market research gathered {len(citations)} source-backed citation(s) using installed research tools.",
+            "truth_note": "These findings are evidence-backed but still require human review before making commercial commitments.",
+            "findings": findings,
+            "citations": citations,
+            "live": True,
+        }
+    fallback = _default_market_signal(prompt)
+    return {**fallback, "findings": [], "citations": [], "live": False}
+
+
+def _build_hitl_checkpoints(plan: dict, missing_templates: list[dict], creation_suggestions: list[dict]) -> list[dict]:
+    checkpoints: list[dict] = []
+    if missing_templates:
+        checkpoints.append({
+            "stage": "installation",
+            "label": "Approve marketplace installs",
+            "detail": f"Install {len(missing_templates)} missing marketplace agent template(s) before building the workflow.",
+        })
+    if creation_suggestions:
+        checkpoints.append({
+            "stage": "creation",
+            "label": "Approve agent draft creation",
+            "detail": f"Create {len(creation_suggestions)} suggested custom agent draft(s) because the current inventory does not fully cover the requested workflow.",
+        })
+    checkpoints.append({
+        "stage": "execution",
+        "label": "Approve workflow execution",
+        "detail": "Confirm inputs, repository context, and KB scope before starting the final workflow run.",
+    })
+    return checkpoints
+
+
+def _build_creation_suggestions(prompt: str, goal_type: str, missing_templates: list[dict], selected_agents: list[dict]) -> list[dict]:
+    if not missing_templates and len(selected_agents) >= 2:
+        return []
+    prompt_excerpt = prompt.strip()[:240]
+    suggestions: list[dict] = [
+        {
+            "name": "Use Case Research Synthesizer",
+            "framework": "langgraph",
+            "model_name": "gpt-4o",
+            "tools": ["knowledge_base_search", "document_store", "webpage_fetch", "serpapi_search"],
+            "description": "Researches the use case, extracts grounded constraints, and prepares evidence-backed orchestration inputs.",
+            "system_prompt": (
+                "You are a use-case research synthesizer. Infer the real business and technical intent from the user's prompt, "
+                "collect the most relevant workspace and external evidence, summarize viability, call out uncertainty, and return only structured findings."
+            ),
+            "rationale": "Recommended when the workflow needs discovery, truth-checking, or broader evidence before execution planning.",
+            "hitl_enabled": False,
+            "tags": [goal_type, "research", "orchestration"],
+        },
+        {
+            "name": "Architecture and Prompt Orchestrator",
+            "framework": "langgraph",
+            "model_name": "gpt-4o",
+            "tools": ["knowledge_base_search", "document_store", "risk_scorer", "trigger_hitl"],
+            "description": "Builds the end-to-end architecture, rich reusable prompts, agent boundaries, and approval checkpoints for the requested use case.",
+            "system_prompt": (
+                "You are an architecture and prompt orchestrator. Design an end-to-end agentic workflow, propose reusable prompts, "
+                "identify tools and models per agent, and insert HITL checkpoints where installation, creation, or risk acceptance needs human approval."
+            ),
+            "rationale": "Recommended when no single installed or marketplace agent cleanly covers architecture synthesis plus orchestrator prompt design.",
+            "hitl_enabled": True,
+            "tags": [goal_type, "architecture", "prompting"],
+        },
+    ]
+    return suggestions[:2]
+
+
+def _build_plan_citations(
+    selected_agents: list[dict],
+    missing_templates: list[dict],
+    creation_suggestions: list[dict],
+    market_citations: list[dict] | None = None,
+) -> list[dict]:
+    citations: list[dict] = []
+    for agent in selected_agents:
+        citations.append({
+            "label": agent.get("name") or agent.get("agent_id"),
+            "source_type": "installed_agent",
+            "source_ref": agent.get("agent_id"),
+            "excerpt": agent.get("description", ""),
+        })
+    for template in missing_templates:
+        citations.append({
+            "label": template.get("name") or template.get("template_id"),
+            "source_type": "marketplace_template",
+            "source_ref": template.get("template_id"),
+            "excerpt": template.get("description", ""),
+        })
+    for suggestion in creation_suggestions:
+        citations.append({
+            "label": suggestion.get("name"),
+            "source_type": "agent_creation_suggestion",
+            "source_ref": suggestion.get("framework"),
+            "excerpt": suggestion.get("rationale", ""),
+        })
+    citations.extend(market_citations or [])
+    return citations[:16]
+
+
+def _build_architecture_summary(prompt: str, selected_agents: list[dict], creation_suggestions: list[dict]) -> str:
+    stages = [agent.get("name") for agent in selected_agents if agent.get("name")]
+    if creation_suggestions:
+      stages.extend(suggestion.get("name") for suggestion in creation_suggestions if suggestion.get("name"))
+    pipeline = " -> ".join(stages[:6]) or "Discovery -> Planning -> Validation -> Delivery"
+    return (
+        f"Suggested orchestration path: {pipeline}. "
+        f"The workflow should start from the user's intent, enrich it with grounded repo/KB evidence, then move through planning, risk review, and final delivery artifacts for: {prompt.strip()[:180]}."
+    )
+
+
 async def _llm_auto_plan(prompt: str, installed_agents: list[dict], templates: list[dict]) -> dict:
     messages = [
         {
@@ -319,12 +553,15 @@ async def _llm_auto_plan(prompt: str, installed_agents: list[dict], templates: l
                 "Prefer already installed agents when they fit. Use marketplace templates only when an installed agent is missing. "
                 "Return strict JSON with this schema: "
                 "{\"workflow_name\": str, \"workflow_description\": str, \"goal_type\": str, "
-                "\"reasoning_summary\": str, \"recommended_steps\": ["
+                "\"reasoning_summary\": str, \"executive_summary\": str, \"architecture_summary\": str, "
+                "\"orchestrator_prompt\": str, \"recommended_steps\": ["
                 "{\"label\": str, \"why\": str, \"selection_type\": \"installed_agent\"|\"template\", "
                 "\"agent_id\": str, \"template_id\": str, "
                 "\"input_bindings\": {\"include_text_input\": bool, \"include_uploaded_files\": bool, "
                 "\"include_github_repo\": bool, \"include_knowledge_base\": bool, \"include_upstream_outputs\": bool}}], "
-                "\"workflow_input_hints\": {\"needs_text\": bool, \"needs_files\": bool, \"needs_repo_import\": bool, \"needs_kb\": bool}}. "
+                "\"workflow_input_hints\": {\"needs_text\": bool, \"needs_files\": bool, \"needs_repo_import\": bool, \"needs_kb\": bool}, "
+                "\"hitl_checkpoints\": [{\"stage\": str, \"label\": str, \"detail\": str}], "
+                "\"agent_creation_suggestions\": [{\"name\": str, \"framework\": str, \"model_name\": str, \"tools\": [str], \"description\": str, \"system_prompt\": str, \"rationale\": str, \"hitl_enabled\": bool, \"tags\": [str]}]}. "
                 "Use 2 to 5 steps. Do not invent IDs. Leave irrelevant id fields as empty strings."
             ),
         },
@@ -421,6 +658,7 @@ async def _resolve_auto_plan(
     auto_install_missing: bool,
     user_id: str | None,
 ) -> dict:
+    logger.info("api.workflow.auto_build.plan_start", auto_install_missing=auto_install_missing, prompt_excerpt=prompt[:180])
     template_by_id = {template["template_id"]: template for template in templates}
     installed_by_id = {agent["agent_id"]: agent for agent in installed_agents}
     installed_by_template = {
@@ -436,8 +674,11 @@ async def _resolve_auto_plan(
         plan = {
             "workflow_name": "Auto-built workflow",
             "workflow_description": prompt[:240],
-            "goal_type": "general",
+            "goal_type": _infer_goal_type(prompt),
             "reasoning_summary": "Built from marketplace and installed-agent fallback matching.",
+            "executive_summary": "The planner matched the prompt against installed agents first, then fell back to marketplace inventory where coverage was missing.",
+            "architecture_summary": "",
+            "orchestrator_prompt": "",
             "recommended_steps": [
                 {
                     "label": template_by_id[template_id]["name"],
@@ -456,6 +697,8 @@ async def _resolve_auto_plan(
                 "needs_repo_import": any(term in _normalized(prompt) for term in ["repo", "repository", "codebase", "java", "python", "spring", "streamlit", "react", "next"]),
                 "needs_kb": True,
             },
+            "hitl_checkpoints": [],
+            "agent_creation_suggestions": [],
         }
 
     selected_agents: list[dict] = []
@@ -520,20 +763,52 @@ async def _resolve_auto_plan(
     if auto_install_missing and len(selected_agents) < 2:
         raise HTTPException(status_code=422, detail="The orchestrator could not assemble at least two valid agents for this workflow prompt.")
 
+    goal_type = plan.get("goal_type") or _infer_goal_type(prompt)
+    creation_suggestions = plan.get("agent_creation_suggestions") or _build_creation_suggestions(prompt, goal_type, missing_templates, selected_agents)
+    hitl_checkpoints = plan.get("hitl_checkpoints") or _build_hitl_checkpoints(plan, missing_templates, creation_suggestions)
+    architecture_summary = plan.get("architecture_summary") or _build_architecture_summary(prompt, selected_agents, creation_suggestions)
+    market_signal = await _run_market_research(prompt)
+    citations = _build_plan_citations(
+        selected_agents,
+        missing_templates,
+        creation_suggestions,
+        market_citations=market_signal.get("citations") or [],
+    )
+    logger.info(
+        "api.workflow.auto_build.plan_resolved",
+        selected_agents=len(selected_agents),
+        missing_templates=len(missing_templates),
+        creation_suggestions=len(creation_suggestions),
+        hitl_checkpoints=len(hitl_checkpoints),
+        market_citations=len(market_signal.get("citations") or []),
+    )
+
     workflow_id = str(uuid.uuid4())
     nodes, edges = _build_canvas_nodes(selected_agents, step_map, workflow_id)
     return {
         "workflow_id": workflow_id,
         "workflow_name": plan.get("workflow_name") or "Auto-built workflow",
         "workflow_description": plan.get("workflow_description") or prompt[:240],
-        "goal_type": plan.get("goal_type") or "general",
+        "goal_type": goal_type,
         "reasoning_summary": plan.get("reasoning_summary") or "",
+        "executive_summary": plan.get("executive_summary") or plan.get("reasoning_summary") or "",
+        "architecture_summary": architecture_summary,
+        "orchestrator_prompt": plan.get("orchestrator_prompt") or (
+            "Infer the user's true intent, gather the most relevant KB, repository, and tool evidence, "
+            "recommend the best agent workflow with explicit model/tool choices, pause for installation or creation approvals, "
+            "and produce a grounded architecture summary plus execution-ready prompts."
+        ),
         "nodes": nodes,
         "edges": edges,
         "selected_agent_ids": [agent["agent_id"] for agent in selected_agents],
         "missing_templates": missing_templates,
         "installed_now": installed_now,
         "workflow_input_hints": plan.get("workflow_input_hints") or {},
+        "hitl_checkpoints": hitl_checkpoints,
+        "agent_creation_suggestions": creation_suggestions,
+        "citations": citations,
+        "market_signal": market_signal,
+        "market_research": market_signal.get("findings") or [],
         "ready": len(selected_agents) >= 2 and not missing_templates,
     }
 

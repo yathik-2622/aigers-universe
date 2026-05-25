@@ -9,18 +9,22 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import io
 import mimetypes
 import os
 import re
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
+import httpx
 import structlog
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from config import BASE_DIR, settings
+from core.runtime_settings import resolve_external_key
 from core.request_context import get_optional_user_id, require_user_id
 from db.collection_names import AIGERS_CATEGORIES, AIGERS_CHUNKS, AIGERS_DOCUMENTS, AIGERS_GRAPH_LAYOUTS
 from db.mongo_client import get_db
@@ -41,6 +45,9 @@ ALLOWED_EXTENSIONS = {
 KB_VISIBILITY = {"private", "public"}
 MAX_FILE_SIZE_MB = 20
 RAW_STORAGE_ROOT = BASE_DIR / "storage" / "documents"
+REPO_IMPORT_MAX_ARCHIVE_BYTES = 80 * 1024 * 1024
+REPO_IMPORT_MAX_TEXT_CHARS = 2_500_000
+REPO_IMPORT_MAX_FILES = 5000
 
 
 class CreateCategoryRequest(BaseModel):
@@ -50,6 +57,10 @@ class CreateCategoryRequest(BaseModel):
 
 class IngestDocumentsRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
+
+
+class UpdateDocumentVisibilityRequest(BaseModel):
+    visibility: str = Field(...)
 
 
 def _utcnow() -> str:
@@ -96,6 +107,74 @@ def _context_excerpt(text: str, limit: int = 24000) -> str:
 def _safe_filename(filename: str) -> str:
     candidate = Path(filename or "unnamed").name
     return re.sub(r"[^A-Za-z0-9._-]+", "_", candidate) or "unnamed"
+
+
+def _parse_github_repo_url(repo_url: str) -> tuple[str, str, str | None]:
+    value = (repo_url or "").strip()
+    pattern = re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/#?]+?)(?:\.git)?(?:/tree/(?P<branch>[^/#?]+))?/?$")
+    match = pattern.match(value)
+    if not match:
+        raise HTTPException(status_code=422, detail="Enter a valid GitHub repository URL")
+    return match.group("owner"), match.group("repo"), match.group("branch")
+
+
+async def _download_github_repo_text(repo_url: str, user_id: str | None) -> dict:
+    owner, repo, branch = _parse_github_repo_url(repo_url)
+    token = await resolve_external_key("github_token", user_id)
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "AIgers-Universe"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        repo_meta = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+        if repo_meta.status_code >= 400:
+            raise HTTPException(status_code=repo_meta.status_code, detail="Failed to read GitHub repository metadata")
+        repo_payload = repo_meta.json()
+        resolved_branch = branch or repo_payload.get("default_branch") or "main"
+        archive = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/zipball/{resolved_branch}",
+            headers=headers,
+        )
+        if archive.status_code >= 400:
+            raise HTTPException(status_code=archive.status_code, detail="Failed to download the GitHub repository archive")
+        archive_bytes = archive.content
+        if len(archive_bytes) > REPO_IMPORT_MAX_ARCHIVE_BYTES:
+            raise HTTPException(status_code=413, detail="Repository archive is too large to import")
+
+    parts: list[str] = []
+    files_indexed = 0
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            relative_parts = Path(info.filename).parts[1:]
+            relative_path = "/".join(relative_parts)
+            ext = Path(relative_path).suffix.lower()
+            if ext and ext not in ALLOWED_EXTENSIONS:
+                continue
+            if files_indexed >= REPO_IMPORT_MAX_FILES:
+                break
+            try:
+                raw_bytes = zf.read(info)
+            except Exception:
+                continue
+            text = raw_bytes.decode("utf-8", errors="ignore")
+            if not text.strip():
+                continue
+            parts.append(f"[FILE] {relative_path}\n{text[:24000]}")
+            files_indexed += 1
+            if sum(len(part) for part in parts) >= REPO_IMPORT_MAX_TEXT_CHARS:
+                break
+
+    combined_text = "\n\n".join(parts)[:REPO_IMPORT_MAX_TEXT_CHARS]
+    if not combined_text.strip():
+        raise HTTPException(status_code=422, detail="No supported text content was extracted from the GitHub repository")
+    return {
+        "filename": f"{owner}-{repo}-{resolved_branch}.repo.txt",
+        "text": combined_text,
+        "files_indexed": files_indexed,
+        "branch": resolved_branch,
+        "repo_url": repo_url.strip(),
+    }
 
 
 def _extract_text_from_file(filename: str, file_bytes: bytes, mime_type: str | None = None) -> str:
@@ -307,17 +386,56 @@ async def _create_raw_document_record(
 
     file_hash = file_sha256_hex(file_bytes)
     content_hash = content_hash_from_bytes(file_bytes, "")
-    existing = await db[AIGERS_DOCUMENTS].find_one(
+    existing_docs = await db[AIGERS_DOCUMENTS].find(
         {
-            "owner_user_id": user_id,
             "content_hash": content_hash,
             "scope": "knowledge_base",
             "deleted_at": None,
         },
         {"_id": 0},
-    )
-    if existing:
-        return {**existing, "deduplicated": True}
+    ).sort("uploaded_at", 1).to_list(20)
+    public_docs = [doc for doc in existing_docs if doc.get("visibility") == "public"]
+    same_user_docs = [doc for doc in existing_docs if doc.get("owner_user_id") == user_id]
+
+    if public_docs:
+        public_doc = public_docs[0]
+        same_owner_public = public_doc.get("owner_user_id") == user_id
+        reason = "public_duplicate_same_owner" if same_owner_public else "public_duplicate_other_owner"
+        if normalized_visibility == "private":
+            reason = "public_available_use_existing"
+        return {
+            "duplicate": True,
+            "duplicate_reason": reason,
+            "existing_document": public_doc,
+            "same_owner": same_owner_public,
+            "visibility_change_suggested": False,
+        }
+
+    if same_user_docs:
+        preferred = same_user_docs[0]
+        if preferred.get("visibility") == normalized_visibility:
+            return {
+                "duplicate": True,
+                "duplicate_reason": "same_owner_same_visibility",
+                "existing_document": preferred,
+                "same_owner": True,
+                "visibility_change_suggested": False,
+            }
+        if preferred.get("visibility") == "private" and normalized_visibility == "public":
+            return {
+                "duplicate": True,
+                "duplicate_reason": "same_owner_private_to_public",
+                "existing_document": preferred,
+                "same_owner": True,
+                "visibility_change_suggested": True,
+            }
+        return {
+            "duplicate": True,
+            "duplicate_reason": "same_owner_duplicate",
+            "existing_document": preferred,
+            "same_owner": True,
+            "visibility_change_suggested": False,
+        }
 
     document_id = str(uuid.uuid4())
     raw_storage_path = await _save_raw_file(document_id, filename, file_bytes)
@@ -448,6 +566,18 @@ def _serialize_document(document: dict) -> dict:
     }
 
 
+def _serialize_duplicate_result(filename: str, duplicate_payload: dict) -> dict:
+    existing = duplicate_payload.get("existing_document") or {}
+    return {
+        "filename": filename,
+        "duplicate": True,
+        "duplicate_reason": duplicate_payload.get("duplicate_reason"),
+        "same_owner": bool(duplicate_payload.get("same_owner")),
+        "visibility_change_suggested": bool(duplicate_payload.get("visibility_change_suggested")),
+        "existing_document": _serialize_document(existing) if existing else None,
+    }
+
+
 @router.get("/chunking-strategies")
 async def list_chunking_strategies():
     return {"strategies": CHUNKING_STRATEGIES_INFO}
@@ -518,7 +648,10 @@ async def upload_documents_many(
             visibility=visibility,
             chunk_strategy=chunk_strategy,
         )
-        results.append(_serialize_document(stored))
+        if stored.get("duplicate"):
+            results.append(_serialize_duplicate_result(filename, stored))
+        else:
+            results.append(_serialize_document(stored))
     return {"documents": results, "count": len(results)}
 
 
@@ -573,14 +706,65 @@ async def upload_workflow_input(
     return _serialize_document(stored)
 
 
-@router.post("/import-github", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def import_github_repo():
-    raise HTTPException(status_code=501, detail="GitHub repository import is not available in the current AIgers document pipeline yet.")
+@router.post("/import-github", status_code=status.HTTP_201_CREATED)
+async def import_github_repo(
+    request: Request,
+    repo_url: str = Form(...),
+    category: str = Form(default="repo-context"),
+    sub_category: str = Form(default=""),
+    visibility: str = Form(default="private"),
+    chunk_strategy: str = Form(default="code-aware"),
+):
+    user_id = require_user_id(request)
+    repo_payload = await _download_github_repo_text(repo_url, user_id)
+    stored = await _store_document_text(
+        request,
+        repo_payload["filename"],
+        ".txt",
+        repo_payload["text"],
+        category,
+        sub_category=sub_category,
+        visibility=visibility,
+        scope="knowledge_base",
+        source_meta={
+            "ingest_mode": "github_repo_import",
+            "repo_url": repo_payload["repo_url"],
+            "branch": repo_payload["branch"],
+            "files_indexed": repo_payload["files_indexed"],
+        },
+        index_for_kb=True,
+        file_size_bytes=len(repo_payload["text"].encode("utf-8", errors="ignore")),
+        chunk_strategy=chunk_strategy,
+    )
+    return {**_serialize_document(stored), "repo_url": repo_payload["repo_url"], "files_indexed": repo_payload["files_indexed"]}
 
 
-@router.post("/workflow-input/import-github", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def import_workflow_github_repo():
-    raise HTTPException(status_code=501, detail="Workflow GitHub import is not available in the current AIgers document pipeline yet.")
+@router.post("/workflow-input/import-github", status_code=status.HTTP_201_CREATED)
+async def import_workflow_github_repo(
+    request: Request,
+    repo_url: str = Form(...),
+    category: str = Form(default="workflow-input"),
+):
+    user_id = require_user_id(request)
+    repo_payload = await _download_github_repo_text(repo_url, user_id)
+    stored = await _store_document_text(
+        request,
+        repo_payload["filename"],
+        ".txt",
+        repo_payload["text"],
+        category,
+        scope="workflow_input",
+        source_meta={
+            "ingest_mode": "workflow_github_repo_import",
+            "repo_url": repo_payload["repo_url"],
+            "branch": repo_payload["branch"],
+            "files_indexed": repo_payload["files_indexed"],
+        },
+        index_for_kb=False,
+        file_size_bytes=len(repo_payload["text"].encode("utf-8", errors="ignore")),
+        chunk_strategy="code-aware",
+    )
+    return {**_serialize_document(stored), "repo_url": repo_payload["repo_url"], "files_indexed": repo_payload["files_indexed"]}
 
 
 @router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
@@ -640,6 +824,64 @@ async def get_document(document_id: str, request: Request):
     if not document:
         raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
     return document
+
+
+@router.patch("/{document_id}/visibility")
+async def update_document_visibility(document_id: str, request: Request, body: UpdateDocumentVisibilityRequest):
+    user_id = require_user_id(request)
+    visibility = _normalize_visibility(body.visibility)
+    db = get_db()
+    document = await db[AIGERS_DOCUMENTS].find_one(
+        {"document_id": document_id, "owner_user_id": user_id, "deleted_at": None, "scope": "knowledge_base"},
+        {"_id": 0},
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+    if document.get("visibility") == visibility:
+        return {"document": _serialize_document(document), "updated": False}
+    await db[AIGERS_DOCUMENTS].update_one(
+        {"document_id": document_id},
+        {"$set": {"visibility": visibility, "updated_at": _utcnow()}},
+    )
+    await db[AIGERS_CHUNKS].update_many(
+        {"document_id": document_id},
+        {"$set": {"visibility": visibility, "metadata.visibility": visibility}},
+    )
+    updated = await db[AIGERS_DOCUMENTS].find_one({"document_id": document_id}, {"_id": 0})
+    return {"document": _serialize_document(updated or document), "updated": True}
+
+
+@router.get("/{document_id}/content")
+async def get_document_content(document_id: str, request: Request):
+    db = get_db()
+    user_id = get_optional_user_id(request)
+    access_query = [{"document_id": document_id}, {"deleted_at": None}]
+    if user_id:
+        access_query.append({"$or": [{"owner_user_id": user_id}, {"visibility": "public"}]})
+    else:
+        access_query.append({"visibility": "public"})
+    document = await db[AIGERS_DOCUMENTS].find_one({"$and": access_query}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+    text = (document.get("text") or document.get("context_excerpt") or "").strip()
+    if not text and document.get("raw_storage_path"):
+        raw_file = Path(document["raw_storage_path"])
+        if raw_file.exists():
+            try:
+                text = raw_file.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                text = ""
+    return {
+        "document_id": document.get("document_id"),
+        "filename": document.get("filename"),
+        "file_type": document.get("file_type"),
+        "scope": document.get("scope"),
+        "visibility": document.get("visibility"),
+        "main_category": document.get("main_category"),
+        "sub_category": document.get("sub_category"),
+        "updated_at": document.get("updated_at"),
+        "content": text,
+    }
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
