@@ -360,11 +360,14 @@ yarn start</pre>
         <li>Verify the composer shows mode, model, tool, and file controls only.</li>
         <li>Select <code>Auto tool</code> and then a specific tool and confirm both states are respected.</li>
         <li>Attach 2 or 3 files and ask a follow-up.</li>
+        <li>Start another chat in <code>Knowledgebase RAG</code> mode and ask for a grounded summary of citations, KB retrieval, and graph visualization.</li>
+        <li>Click one citation pill and confirm the modal opens the underlying source content.</li>
+        <li>Ask an intentionally out-of-scope question in <code>Knowledgebase RAG</code> mode and confirm it politely refuses.</li>
         <li>Rename one chat from history.</li>
         <li>Delete one chat from history.</li>
         <li>Start another chat in <code>General Reasoning</code> mode.</li>
       </ol>
-      <p><strong>Expected:</strong> session persistence works, grounded responses stay accurate, and workflow execution controls are not shown in chat.</p>
+      <p><strong>Expected:</strong> session persistence works, grounded responses stay accurate, citations open real content, and workflow execution controls are not shown in chat.</p>
     </section>
 
     <section class="section">
@@ -418,14 +421,12 @@ yarn start</pre>
       <h2>17. Knowledge Graph 2D/3D</h2>
       <ol>
         <li>Open <code>Knowledge Graph</code> page.</li>
-        <li>Verify main/sub/chunk nodes render.</li>
+        <li>Verify main/sub/document/chunk nodes render.</li>
         <li>Toggle between 3D and 2D modes.</li>
-        <li>In 2D mode, change X/Y projection dimensions.</li>
-        <li>Click one category in legend to isolate the cluster.</li>
-        <li>Click one node to highlight neighbors and semantic links.</li>
+        <li>Click one node to highlight all adjacent nodes and edges.</li>
         <li>Drag nodes and click <code>Save layout</code>, then refresh page.</li>
       </ol>
-      <p><strong>Expected:</strong> semantic edges show similarity-weighted color/width, highlight works, and saved layout reloads correctly.</p>
+      <p><strong>Expected:</strong> semantic and structural edges stay connected across the graph, highlight works, and saved layout reloads correctly.</p>
     </section>
 
     <section class="section">

@@ -5,7 +5,7 @@ import { Sparkles } from 'lucide-react'
 import AIgerDotCanvas from '../components/graph/AIgerDotCanvas.jsx'
 import AIgerSectorLegend from '../components/graph/AIgerSectorLegend.jsx'
 import styles from '../components/graph/AIgerGraph.module.css'
-import { getKnowledgeGraphData } from '../api/knowledgeGraph.js'
+import { getKnowledgeGraphData, saveKnowledgeGraphLayout } from '../api/knowledgeGraph.js'
 import { listDocumentCategories } from '../api/documents.js'
 
 function normalizeValue(value) {
@@ -48,6 +48,7 @@ function sphereMap(seed, radius = 1400, index = 0, total = 1) {
 
 export default function KnowledgeGraphPage() {
   const [rawChunks, setRawChunks] = useState([])
+  const [rawLinks, setRawLinks] = useState([])
   const [loading, setLoading] = useState(true)
   const [panelOpen, setPanelOpen] = useState(true)
   const [mode, setMode] = useState('main')
@@ -55,6 +56,7 @@ export default function KnowledgeGraphPage() {
   const [selectedSubKey, setSelectedSubKey] = useState(null)
   const [highlightDoc, setHighlightDoc] = useState(null)
   const [focusDoc, setFocusDoc] = useState(null)
+  const [selectedNodeId, setSelectedNodeId] = useState('')
   const [legendMainColors, setLegendMainColors] = useState({})
   const [legendSubColors, setLegendSubColors] = useState({})
   const [filters] = useState({ category: '', sub_category: '', visibility: '' })
@@ -72,6 +74,11 @@ export default function KnowledgeGraphPage() {
   const [warpTargetDocId, setWarpTargetDocId] = useState(null)
   const [showAllChunks, setShowAllChunks] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [layoutSaving, setLayoutSaving] = useState(false)
+  const [showStructuralEdges, setShowStructuralEdges] = useState(false)
+  const [showSemanticEdges, setShowSemanticEdges] = useState(false)
+  const [semanticSimilarityFloor, setSemanticSimilarityFloor] = useState(0.74)
+  const [focusNodeId, setFocusNodeId] = useState('')
 
   const fetchAll = useCallback(async (nextFilters = filters) => {
     setLoading(true)
@@ -89,6 +96,7 @@ export default function KnowledgeGraphPage() {
             String(node.document_id || node.docId || ''),
             {
               docId: String(node.document_id || node.docId || ''),
+              nodeId: node.id,
               file_name: node.label || node.filename || node.document_id,
               main_category: node.category || 'general',
               sub_category: node.sub_category || '',
@@ -105,8 +113,10 @@ export default function KnowledgeGraphPage() {
           const doc = docsById.get(String(node.document_id || node.docId || '')) || {}
           return {
             chunk_id: node.id,
+            graph_node_id: node.id,
             docId: String(node.document_id || node.docId || ''),
             doc_id: String(node.document_id || node.docId || ''),
+            doc_node_id: doc.nodeId || '',
             file_name: doc.file_name || node.label,
             main_category: node.category || doc.main_category || 'general',
             sub_category: node.sub_category || doc.sub_category || '',
@@ -146,6 +156,7 @@ export default function KnowledgeGraphPage() {
       }
 
       setRawChunks(nextChunks)
+      setRawLinks(graphData?.links || [])
       setLegendMainColors(mainColorMap)
       setLegendSubColors(subColorMap)
     } catch (error) {
@@ -236,6 +247,20 @@ export default function KnowledgeGraphPage() {
     return nodes
   }, [rawChunks, mainNodes, legendSubColors])
 
+  const selectedSemanticNeighborIds = useMemo(() => {
+    if (!selectedNodeId || !showSemanticEdges) return new Set()
+    const ids = new Set()
+    rawLinks.forEach((link) => {
+      const source = typeof link.source === 'string' ? link.source : link.source?.id
+      const target = typeof link.target === 'string' ? link.target : link.target?.id
+      const similarity = Number(link.similarity ?? 0)
+      if (!source || !target || similarity < semanticSimilarityFloor) return
+      if (source === selectedNodeId) ids.add(target)
+      if (target === selectedNodeId) ids.add(source)
+    })
+    return ids
+  }, [rawLinks, selectedNodeId, showSemanticEdges, semanticSimilarityFloor])
+
   const chunkNodes = useMemo(() => {
     if (mode !== 'chunks') return []
     const parentSub = allSubNodes.find((node) => node.key === selectedSubKey && node.parentKey === selectedMainKey)
@@ -244,6 +269,7 @@ export default function KnowledgeGraphPage() {
 
     const filtered = rawChunks.filter((chunk) => {
       if (highlightDoc) return String(chunk.docId || chunk.doc_id || '') === String(highlightDoc)
+      if (selectedSemanticNeighborIds.has(String(chunk.chunk_id))) return true
       const main = extractMain(chunk)
       const sub = extractSub(chunk)
       if (selectedMainKey && main.key !== selectedMainKey) return false
@@ -264,6 +290,7 @@ export default function KnowledgeGraphPage() {
         docId: String(chunk.docId || chunk.doc_id || ''),
         type: 'chunk',
         group: sub.key || main.key || 'unknown',
+        semanticMatch: selectedSemanticNeighborIds.has(String(chunk.chunk_id)),
         color: legendSubColors[main.key]?.[sub.key] || chunk.color || chunk.sub_color || chunk.main_color || legendMainColors[main.key] || randomColorForString(sub.label || sub.key),
         x: parent.x + (baseX !== null ? (baseX * 0.56 + position.x * 0.44) : position.x),
         y: parent.y + (baseY !== null ? (baseY * 0.56 + position.y * 0.44) : position.y),
@@ -271,24 +298,102 @@ export default function KnowledgeGraphPage() {
         snippet: chunk.snippet || '',
       }
     })
-  }, [rawChunks, mode, selectedMainKey, selectedSubKey, allSubNodes, mainNodes, legendSubColors, legendMainColors, highlightDoc])
+  }, [rawChunks, mode, selectedMainKey, selectedSubKey, allSubNodes, mainNodes, legendSubColors, legendMainColors, highlightDoc, selectedSemanticNeighborIds])
 
   const visibleNodes = useMemo(() => {
-    if (mode === 'main') return mainNodes.map((node) => ({ ...node, active: true, highlight: false }))
+    if (mode === 'main') return mainNodes.map((node) => ({ ...node, active: true, highlight: node.id === selectedNodeId }))
     if (mode === 'sub') {
-      const mains = mainNodes.map((node) => ({ ...node, active: node.key === selectedMainKey, highlight: false }))
+      const mains = mainNodes.map((node) => ({ ...node, active: node.key === selectedMainKey, highlight: node.id === selectedNodeId }))
       const subs = allSubNodes
         .filter((node) => !selectedMainKey || node.parentKey === selectedMainKey)
-        .map((node) => ({ ...node, active: true, highlight: false }))
+        .map((node) => ({ ...node, active: true, highlight: node.id === selectedNodeId }))
       return mains.concat(subs)
     }
-    const mains = mainNodes.map((node) => ({ ...node, active: false, highlight: false }))
+    const mains = mainNodes.map((node) => ({ ...node, active: false, highlight: node.id === selectedNodeId }))
     const subs = allSubNodes
       .filter((node) => !selectedMainKey || node.parentKey === selectedMainKey)
-      .map((node) => ({ ...node, active: selectedSubKey ? node.key === selectedSubKey : false, highlight: false }))
-    const chunks = chunkNodes.map((node) => ({ ...node, active: true, highlight: highlightDoc ? node.docId === highlightDoc : false }))
+      .map((node) => ({ ...node, active: selectedSubKey ? node.key === selectedSubKey : false, highlight: node.id === selectedNodeId }))
+    const chunks = chunkNodes.map((node) => ({
+      ...node,
+      active: true,
+      highlight: highlightDoc
+        ? node.docId === highlightDoc || node.id === selectedNodeId || node.semanticMatch
+        : node.id === selectedNodeId || node.semanticMatch,
+    }))
     return mains.concat(subs).concat(chunks)
-  }, [mode, mainNodes, allSubNodes, chunkNodes, selectedMainKey, selectedSubKey, highlightDoc])
+  }, [mode, mainNodes, allSubNodes, chunkNodes, selectedMainKey, selectedSubKey, highlightDoc, selectedNodeId])
+
+  const visibleLinks = useMemo(() => {
+    const links = []
+    const currentNodeIds = new Set(visibleNodes.map((node) => node.id))
+    if (showStructuralEdges && mode === 'sub') {
+      allSubNodes
+        .filter((node) => !selectedMainKey || node.parentKey === selectedMainKey)
+        .forEach((subNode) => {
+          links.push({
+            id: `main-link::${subNode.parentKey}::${subNode.key}`,
+            source: `main::${subNode.parentKey}`,
+            target: subNode.id,
+            edge_type: 'structural',
+            similarity: 1,
+          })
+        })
+    }
+    if (mode === 'chunks') {
+      if (showStructuralEdges) {
+      chunkNodes.forEach((chunkNode) => {
+        const rawChunk = rawChunks.find((item) => item.chunk_id === chunkNode.id)
+        const main = extractMain(rawChunk)
+        const sub = extractSub(rawChunk)
+        const parentId = selectedSubKey ? `sub::${main.key}::${sub.key}` : `main::${main.key}`
+        if (currentNodeIds.has(parentId)) {
+          links.push({
+            id: `structural::${parentId}::${chunkNode.id}`,
+            source: parentId,
+            target: chunkNode.id,
+            edge_type: 'structural',
+            similarity: 1,
+          })
+        }
+      })
+      }
+      if (showSemanticEdges) {
+      rawLinks.forEach((link) => {
+        const source = typeof link.source === 'string' ? link.source : link.source?.id
+        const target = typeof link.target === 'string' ? link.target : link.target?.id
+        const similarity = Number(link.similarity ?? 0)
+        if (!source || !target || similarity < semanticSimilarityFloor) return
+        const touchesSelection = selectedNodeId && (source === selectedNodeId || target === selectedNodeId)
+        if ((currentNodeIds.has(source) && currentNodeIds.has(target)) || touchesSelection) {
+          links.push({
+            id: `${source}::${target}::${similarity}`,
+            source,
+            target,
+            edge_type: link.edge_type || 'semantic',
+            similarity,
+          })
+        }
+      })
+      }
+    }
+    return links
+  }, [allSubNodes, chunkNodes, mode, rawChunks, rawLinks, selectedMainKey, selectedSubKey, visibleNodes, showStructuralEdges, showSemanticEdges, semanticSimilarityFloor, selectedNodeId])
+
+  const adjacency = useMemo(() => {
+    const relatedNodeIds = new Set()
+    const relatedLinkIds = new Set()
+    if (!selectedNodeId) return { relatedNodeIds, relatedLinkIds }
+    visibleLinks.forEach((link) => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source?.id
+      const targetId = typeof link.target === 'string' ? link.target : link.target?.id
+      if (sourceId === selectedNodeId || targetId === selectedNodeId) {
+        relatedNodeIds.add(sourceId)
+        relatedNodeIds.add(targetId)
+        relatedLinkIds.add(link.id)
+      }
+    })
+    return { relatedNodeIds, relatedLinkIds }
+  }, [selectedNodeId, visibleLinks])
 
   const mainLegendItems = useMemo(
     () => mainNodes.map((node) => ({ key: node.key, label: node.label, count: node.count, color: node.color })),
@@ -346,6 +451,8 @@ export default function KnowledgeGraphPage() {
     const key = mainNodes.find((node) => node.label === mainLabel || node.key === mainLabel)?.key || normalizeKey(mainLabel)
     setSelectedMainKey(key)
     setSelectedSubKey(null)
+    setSelectedNodeId(`main::${key}`)
+    setFocusNodeId(`main::${key}`)
     setMode('sub')
     setHighlightDoc(null)
     setPanelOpen(true)
@@ -354,7 +461,10 @@ export default function KnowledgeGraphPage() {
 
   function handleSubClick(subLabel) {
     const key = allSubNodes.find((node) => node.key === subLabel || node.label === subLabel)?.key || normalizeKey(subLabel)
+    const node = allSubNodes.find((item) => item.key === key)
     setSelectedSubKey(key)
+    setSelectedNodeId(node?.id || '')
+    setFocusNodeId(node?.id || '')
     setMode('chunks')
     setHighlightDoc(null)
     setPanelOpen(true)
@@ -363,6 +473,8 @@ export default function KnowledgeGraphPage() {
 
   function handleNodeClick(node) {
     if (!node) return
+    setSelectedNodeId(node.id)
+    setFocusNodeId(node.id)
     if (node.type === 'main') {
       setSelectedMainKey(node.key)
       setMode('sub')
@@ -389,6 +501,8 @@ export default function KnowledgeGraphPage() {
       const sub = extractSub(record)
       setSelectedMainKey(main.key)
       setSelectedSubKey(sub.key)
+      setSelectedNodeId(record.chunk_id)
+      setFocusNodeId(record.chunk_id)
     }
     setMode('chunks')
     setHighlightDoc(docId)
@@ -401,8 +515,10 @@ export default function KnowledgeGraphPage() {
     setMode('main')
     setSelectedMainKey(null)
     setSelectedSubKey(null)
+    setSelectedNodeId('')
     setHighlightDoc(null)
     setFocusDoc(null)
+    setFocusNodeId('')
     setPanelOpen(true)
     setResetSignal((value) => value + 1)
     setShowAllChunks(false)
@@ -438,6 +554,8 @@ export default function KnowledgeGraphPage() {
       triggerWarpToDoc(docId)
       setFocusDoc(docId)
       setHighlightDoc(docId)
+      setSelectedNodeId(record.chunk_id)
+      setFocusNodeId(record.chunk_id)
       setMode('chunks')
       setSelectedMainKey(mainKey || extractMain(record).key)
       setSelectedSubKey(subKey || null)
@@ -464,6 +582,19 @@ export default function KnowledgeGraphPage() {
     await fetchAll()
   }
 
+  async function handleSaveLayout() {
+    const positions = visibleNodes.map((node) => ({ id: node.id, x: node.x || 0, y: node.y || 0, z: node.z || 0 }))
+    setLayoutSaving(true)
+    try {
+      await saveKnowledgeGraphLayout(positions)
+      toast.success('Graph layout saved')
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Failed to save graph layout')
+    } finally {
+      setLayoutSaving(false)
+    }
+  }
+
   return (
     <div className="p-6 xl:p-8">
       <div className={styles.pageRoot} style={{ background: '#000' }}>
@@ -471,9 +602,7 @@ export default function KnowledgeGraphPage() {
           AIgers Knowledge Galaxy
         </div>
 
-      <div style={{ width: '100%', height: 'calc(100vh - 2rem)', marginLeft: '0', marginRight: '0', overflow: 'hidden' }}>
-
-
+        <div style={{ width: '100%', height: 'calc(100vh - 2rem)', marginLeft: '0', marginRight: '0', overflow: 'hidden' }}>
           {loading ? (
             <div style={{ width: '100%', height: 'calc(100vh - 2rem)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9fb3ff', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -484,7 +613,12 @@ export default function KnowledgeGraphPage() {
           ) : (
             <AIgerDotCanvas
               nodes={visibleNodes}
+              links={visibleLinks}
+              selectedNodeId={selectedNodeId}
+              relatedNodeIds={[...adjacency.relatedNodeIds]}
+              relatedLinkIds={[...adjacency.relatedLinkIds]}
               focusDocId={focusDoc}
+              focusNodeId={focusNodeId}
               onNodeClick={handleNodeClick}
               onNodeHover={() => {}}
               warpToNodeId={warpTargetDocId}
@@ -497,12 +631,9 @@ export default function KnowledgeGraphPage() {
         </div>
 
         <aside style={{ position: 'absolute', right: panelOpen ? 18 : -420, top: 42, zIndex: 7000, transition: 'right .28s ease', width: 392 }}>
-
-
-
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderRadius: 24, background: 'rgba(4,10,22,0.82)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 90px rgba(0,0,0,0.34)', padding: 16, color: '#fff', backdropFilter: 'blur(16px)' }}>
             <div style={{ width: '100%', maxHeight: 'calc(100vh - 96px)', overflowY: 'auto', paddingRight: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, position: 'sticky', top: 0, background: 'rgba(4,10,22,0.82)', backdropFilter: 'blur(16px)', zIndex: 1, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)'}}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, position: 'sticky', top: 0, background: 'rgba(4,10,22,0.82)', backdropFilter: 'blur(16px)', zIndex: 1, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                 <div>
                   <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
                     {mode === 'main' ? 'Main categories' : mode === 'sub' ? `Subcategories of ${mainNodes.find((node) => node.key === selectedMainKey)?.label || selectedMainKey}` : highlightDoc ? `Chunks of ${highlightDoc}` : `Chunks ${selectedSubKey || selectedMainKey || ''}`}
@@ -512,6 +643,7 @@ export default function KnowledgeGraphPage() {
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button {...clickProps} onClick={handleResetAll} className="rounded-full bg-white/[0.08] px-3 py-2 text-xs text-white">Reset</button>
                   <button {...clickProps} onClick={handleRefreshGraph} className="rounded-full bg-white/[0.08] px-3 py-2 text-xs text-white">{refreshing ? 'Refreshing...' : 'Refresh Data'}</button>
+                  <button {...clickProps} onClick={handleSaveLayout} className="rounded-full bg-white/[0.08] px-3 py-2 text-xs text-white">{layoutSaving ? 'Saving...' : 'Save layout'}</button>
                   <button {...clickProps} onClick={() => setPanelOpen(false)} className="rounded-full bg-white/[0.08] px-3 py-2 text-xs text-white">Hide</button>
                 </div>
               </div>
@@ -522,6 +654,25 @@ export default function KnowledgeGraphPage() {
                 <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
                   <div style={{ fontSize: 12 }}>Star bloom</div>
                   <input type="range" min="0.0" max="1.2" step="0.02" value={starGlow} onChange={(event) => setStarGlow(Number(event.target.value))} style={{ flex: 1 }} />
+                </div>
+
+                <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span>Show structural edges</span>
+                    <input type="checkbox" checked={showStructuralEdges} onChange={(event) => setShowStructuralEdges(event.target.checked)} />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span>Show semantic edges</span>
+                    <input type="checkbox" checked={showSemanticEdges} onChange={(event) => setShowSemanticEdges(event.target.checked)} />
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 12, minWidth: 116 }}>Semantic floor</div>
+                    <input type="range" min="0.7" max="0.95" step="0.01" value={semanticSimilarityFloor} onChange={(event) => setSemanticSimilarityFloor(Number(event.target.value))} style={{ flex: 1 }} />
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.72)', width: 36, textAlign: 'right' }}>{semanticSimilarityFloor.toFixed(2)}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}>
+                    Semantic edges can connect chunks across completely different categories when their vectors are close enough.
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.8)' }}>Label Controls (per type)</div>
@@ -603,6 +754,8 @@ export default function KnowledgeGraphPage() {
                       setMode('chunks')
                       setSelectedMainKey(null)
                       setSelectedSubKey(null)
+                      setSelectedNodeId('')
+                      setFocusNodeId('')
                       setHighlightDoc(null)
                       setPanelOpen(true)
                     }}
@@ -639,7 +792,7 @@ export default function KnowledgeGraphPage() {
               <div style={{ marginTop: 12, maxHeight: '20vh', overflow: 'auto' }}>
                 {selectedMainKey ? (
                   allSubNodes.filter((node) => node.parentKey === selectedMainKey).length ? allSubNodes.filter((node) => node.parentKey === selectedMainKey).map((node) => (
-                    <div key={node.id} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: 8, borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.03)', marginBottom: 8 }}>
+                    <div key={node.id} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: 8, borderRadius: 12, background: selectedNodeId === node.id ? 'rgba(56,189,248,0.14)' : 'rgba(255,255,255,0.02)', border: selectedNodeId === node.id ? '1px solid rgba(56,189,248,0.35)' : '1px solid rgba(255,255,255,0.03)', marginBottom: 8 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={() => handleSubClick(node.key)}>
                         <div style={{ width: 14, height: 14, borderRadius: 4, background: node.color || '#888' }} />
                         <div>
@@ -661,7 +814,7 @@ export default function KnowledgeGraphPage() {
               <div style={{ marginTop: 12, maxHeight: '22vh', overflow: 'auto' }}>
                 <strong style={{ display: 'block', marginBottom: 8 }}>Files</strong>
                 {docGroups.length ? docGroups.map((group) => (
-                  <div key={group.docId} style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'center', padding: 8, borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.03)', marginBottom: 8 }} onClick={() => handleDocumentRowClick(group.docId)}>
+                  <div key={group.docId} style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'center', padding: 8, borderRadius: 12, background: highlightDoc === group.docId ? 'rgba(56,189,248,0.14)' : 'rgba(255,255,255,0.02)', border: highlightDoc === group.docId ? '1px solid rgba(56,189,248,0.35)' : '1px solid rgba(255,255,255,0.03)', marginBottom: 8 }} onClick={() => handleDocumentRowClick(group.docId)}>
                     <div style={{ width: 14, height: 14, borderRadius: 4, background: group.color || '#888' }} />
                     <div>
                       <div style={{ fontWeight: 800 }}>{group.file}</div>
@@ -676,11 +829,12 @@ export default function KnowledgeGraphPage() {
                   <>
                     <div style={{ marginBottom: 8, fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>Chunks for <strong>{highlightDoc}</strong></div>
                     {highlightedDocChunks.length ? highlightedDocChunks.map((chunk) => (
-                      <div key={chunk.id} style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'flex-start', padding: 8, borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.03)', marginBottom: 8, flexDirection: 'column' }}>
+                      <div key={chunk.id} style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'flex-start', padding: 8, borderRadius: 12, background: selectedNodeId === chunk.id ? 'rgba(250,204,21,0.12)' : 'rgba(255,255,255,0.02)', border: selectedNodeId === chunk.id ? '1px solid rgba(250,204,21,0.34)' : '1px solid rgba(255,255,255,0.03)', marginBottom: 8, flexDirection: 'column' }}>
                         <div style={{ display: 'flex', width: '100%', gap: 12 }}>
                           <div style={{ width: 14, height: 14, borderRadius: 4, background: chunk.color || '#88aaff', flex: '0 0 14px' }} />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 800 }}>{chunk.label}</div>
+                            {chunk.semanticMatch ? <div style={{ fontSize: 11, color: 'rgba(56,189,248,0.92)' }}>Semantic neighbor</div> : null}
                             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.68)' }}>{chunk.snippet ? (chunk.snippet.length > 180 ? `${chunk.snippet.slice(0, 180)}...` : chunk.snippet) : 'No snippet'}</div>
                           </div>
                         </div>

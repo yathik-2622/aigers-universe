@@ -3,7 +3,6 @@ import json
 import os
 import re
 import uuid
-from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
@@ -22,9 +21,16 @@ from api.document_router import (
 )
 from config import settings
 from core.agent_registry import TOOL_SCHEMAS, invoke_agent_by_id
+from core.chat_grounding import (
+    MAX_PLATFORM_PROMPT_CHARS,
+    load_platform_documents,
+    rank_platform_documents,
+    retrieve_knowledge_chunks,
+)
 from core.llm_router import _build_client
-from core.request_context import require_user_id
+from core.request_context import get_optional_user_id, require_user_id
 from core.runtime_settings import discover_models_for_user
+from db.collection_names import AIGERS_DOCUMENTS
 from db.mongo_client import get_db
 from mcp_tools.tool_server import TOOL_METADATA, TOOL_REGISTRY
 
@@ -32,6 +38,7 @@ router = APIRouter()
 
 PLATFORM_MODE = "platform"
 GENERAL_MODE = "general"
+KNOWLEDGE_MODE = "knowledge"
 CHAT_SAFE_TOOL_NAMES = [name for name in TOOL_REGISTRY.keys() if name != "trigger_hitl"]
 CHAT_NATIVE_TOOL_SCHEMAS = {
     "search_platform_catalog": {
@@ -96,7 +103,7 @@ def _utcnow() -> str:
 
 def _normalize_mode(mode: str | None) -> str:
     normalized = (mode or PLATFORM_MODE).strip().lower()
-    return normalized if normalized in {PLATFORM_MODE, GENERAL_MODE} else PLATFORM_MODE
+    return normalized if normalized in {PLATFORM_MODE, GENERAL_MODE, KNOWLEDGE_MODE} else PLATFORM_MODE
 
 
 def _normalize_tool_names(tool_names: list[str] | None) -> list[str]:
@@ -141,22 +148,85 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=_json_default)}\n\n"
 
 
-@lru_cache(maxsize=1)
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _platform_doc_records() -> list[dict]:
+    return load_platform_documents(_repo_root())
+
+
+def _platform_doc_source_id(relative_path: str) -> str:
+    normalized_path = relative_path.replace("\\", "/")
+    return f"platform::{normalized_path}"
+
+
+def _platform_doc_url(relative_path: str) -> str:
+    return f"/api/tool-chat/sources/{_platform_doc_source_id(relative_path)}"
+
+
 def _platform_docs_bundle() -> str:
-    repo_root = Path(__file__).resolve().parents[2]
     bundles: list[str] = []
-    for relative_path, label, limit in [
-        ("README.md", "README", 5000),
-        ("USER_GUIDE.md", "USER_GUIDE", 5000),
-        ("Technical_architecture.md", "TECHNICAL_ARCHITECTURE", 6500),
-        ("E2E_TESTING.md", "E2E_TESTING", 3500),
-    ]:
-        file_path = repo_root / relative_path
-        if not file_path.exists():
-            continue
-        text = file_path.read_text(encoding="utf-8", errors="ignore")
-        bundles.append(f"[{label}]\n{text[:limit]}")
+    for doc in load_platform_documents(_repo_root()):
+        bundles.append(f"[{doc['label']}]\n{doc['content'][:MAX_PLATFORM_PROMPT_CHARS]}")
     return "\n\n".join(bundles)
+
+
+def _build_source_citation(
+    *,
+    label: str,
+    source_type: str,
+    excerpt: str,
+    content_url: str,
+    source_ref: str,
+    url: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    return {
+        "label": label,
+        "source_type": source_type,
+        "source_ref": source_ref,
+        "excerpt": _truncate_text(excerpt, 1600),
+        "content_url": content_url,
+        "url": url or content_url,
+        "metadata": metadata or {},
+    }
+
+
+def _platform_doc_citation(doc: dict, query: str) -> dict:
+    return _build_source_citation(
+        label=doc["label"],
+        source_type="platform_doc",
+        excerpt=doc["content"],
+        content_url=_platform_doc_url(doc["relative_path"]),
+        source_ref=doc["source_id"],
+        metadata={"query": query, "score": doc.get("score", 0)},
+    )
+
+
+def _document_citation(doc: dict, excerpt: str, source_type: str = "chat_attachment", metadata: dict | None = None) -> dict:
+    return _build_source_citation(
+        label=doc.get("filename") or doc["document_id"],
+        source_type=source_type,
+        excerpt=excerpt,
+        content_url=f"/api/documents/{doc['document_id']}/content",
+        source_ref=doc["document_id"],
+        metadata=metadata or {},
+    )
+
+
+def _dedupe_citations(citations: list[dict], limit: int = 12) -> list[dict]:
+    results: list[dict] = []
+    seen: set[str] = set()
+    for citation in citations:
+        key = f"{citation.get('source_ref')}|{citation.get('label')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(citation)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def _select_attachment_excerpt(doc: dict) -> str:
@@ -182,7 +252,7 @@ async def _load_session_documents(session: dict) -> list[dict]:
     ids = session.get("attached_document_ids") or []
     if not ids:
         return []
-    return await get_db().documents.find(
+    return await get_db()[AIGERS_DOCUMENTS].find(
         {"document_id": {"$in": ids}},
         {"_id": 0, "vector_ids": 0},
     ).sort("uploaded_at", 1).to_list(50)
@@ -332,6 +402,7 @@ def _extract_citations_from_tool_results(tool_results: list[dict]) -> list[dict]
                     citations.append({
                         "label": result.get("title") or result.get("provider_label") or tool_name,
                         "url": url,
+                        "content_url": url,
                         "source_type": tool_name,
                         "excerpt": _truncate_text(excerpt or url, 1200),
                     })
@@ -353,6 +424,7 @@ def _extract_citations_from_tool_results(tool_results: list[dict]) -> list[dict]
                     citations.append({
                         "label": entry.get("title") or entry.get("name") or tool_name,
                         "url": entry_url or "",
+                        "content_url": entry_url or "",
                         "source_type": tool_name,
                         "excerpt": _truncate_text(entry_excerpt or entry_url or "", 1200),
                     })
@@ -413,6 +485,86 @@ async def _build_platform_context(user_id: str, session: dict) -> str:
     ])
 
 
+async def _build_grounding_payload(*, user_id: str, session: dict, user_message: str, mode: str, model_name: str, logs: list[dict]) -> dict:
+    payload = {
+        "context_sections": [],
+        "citations": [],
+        "retrieval_summary": {},
+        "query_variants": [user_message],
+    }
+
+    docs = await _load_session_documents(session)
+    if docs:
+        attachment_sections = []
+        attachment_citations = []
+        for doc in docs[:8]:
+            excerpt = _select_attachment_excerpt(doc)
+            if not excerpt.strip():
+                continue
+            attachment_sections.append(
+                f"[CHAT_ATTACHMENT] {doc.get('filename') or doc['document_id']}\n{excerpt[:4000]}"
+            )
+            attachment_citations.append(
+                _document_citation(
+                    doc,
+                    excerpt,
+                    source_type="chat_attachment",
+                    metadata={"scope": "chat_input"},
+                )
+            )
+        if attachment_sections:
+            payload["context_sections"].append("CHAT_ATTACHMENTS:\n" + "\n\n".join(attachment_sections))
+            payload["citations"].extend(attachment_citations)
+            _log_step(logs, "Load attachments", f"Prepared {len(attachment_sections)} attached source documents for grounding.")
+
+    platform_docs = rank_platform_documents(user_message, _platform_doc_records(), top_k=5)
+    if platform_docs:
+        payload["context_sections"].append(
+            "LIVE_PLATFORM_DOCS:\n" + "\n\n".join(
+                f"[{doc['label']}]\n{doc['content'][:MAX_PLATFORM_PROMPT_CHARS]}"
+                for doc in platform_docs
+            )
+        )
+        payload["citations"].extend([_platform_doc_citation(doc, user_message) for doc in platform_docs])
+        _log_step(logs, "Refresh platform docs", f"Loaded {len(platform_docs)} live markdown/html sources from the repository.")
+
+    include_kb = mode in {KNOWLEDGE_MODE, GENERAL_MODE}
+    if include_kb:
+        kb_result = await retrieve_knowledge_chunks(
+            user_id=user_id,
+            query=user_message,
+            model_name=model_name,
+            top_k=6,
+            candidate_limit=24,
+            include_private=mode == KNOWLEDGE_MODE,
+        )
+        payload["query_variants"] = kb_result.get("query_variants") or [user_message]
+        matches = kb_result.get("matches") or []
+        if matches:
+            payload["context_sections"].append(
+                "KNOWLEDGE_BASE_MATCHES:\n" + "\n\n".join(
+                    f"[{match['filename']} :: chunk {match['chunk_index'] + 1} | score={match['score']}]\n{match['compressed_text']}"
+                    for match in matches
+                )
+            )
+            payload["citations"].extend([match["citation"] for match in matches if match.get("citation")])
+            payload["retrieval_summary"] = {
+                "mode": "knowledge_base",
+                "matches": len(matches),
+                "query_variants": payload["query_variants"],
+            }
+            _log_step(
+                logs,
+                "Run retrievers",
+                f"Executed MultiQuery retrieval ({len(payload['query_variants'])} queries), MMR ranking, and contextual compression across {len(matches)} KB chunks.",
+            )
+        else:
+            _log_step(logs, "Run retrievers", "Executed KB retrieval but found no sufficiently grounded matches.")
+
+    payload["citations"] = _dedupe_citations(payload["citations"])
+    return payload
+
+
 async def _generate_follow_up_questions(
     *,
     user_id: str,
@@ -431,7 +583,7 @@ async def _generate_follow_up_questions(
             "Generate exactly three concise follow-up questions a user might ask next about AIger's Universe, "
             "its agents, workflows, tools, architecture, or how to use the platform for the current use case. "
             "Return only valid JSON in the form {\"questions\": [\"...\", \"...\", \"...\"]}."
-    )
+        )
     try:
         client, _runtime = await _build_client(user_id)
         response = await client.chat.completions.create(
@@ -457,27 +609,44 @@ def _system_prompt_for_mode(mode: str) -> str:
             "Primary job: explain this exact platform, its architecture, agents, workflows, tools, A2A, KB, HITL, projects, reports, and operating patterns. "
             "When the user describes a use case, map it to the platform using installed agents first, then marketplace templates, tools, workflow steps, inputs, HITL points, and expected outputs. "
             "Be explicit about what exists now versus what would still need implementation. "
-            "Use provided platform context and chat attachments heavily. Do not invent capabilities that are not in the context. "
+            "Use provided grounded sources heavily. Do not invent capabilities that are not in the context. "
             "If MCP tools or installed agents would improve the answer, call them. "
-            "If the user asks something far outside the product, answer briefly and suggest switching to General mode."
+            "If the user asks something far outside the grounded platform sources, politely refuse and say the request is outside the current grounded AIger sources."
+        )
+    if mode == KNOWLEDGE_MODE:
+        return (
+            "You are AIger Knowledgebase mode. Answer only from the provided grounded knowledge-base chunks, live repo docs, and attached files. "
+            "Every answer must stay faithful to those sources, use concise inline references like [1] or [2], and refuse politely if the evidence is missing. "
+            "Do not answer from general world knowledge."
         )
     return (
-        "You are AIger General Chat. Help with broader reasoning, code generation, technical planning, and analysis. "
-        "You still operate inside AIger's Universe, so when the question touches this platform you must stay faithful to the supplied platform inventory. "
-        "Use tools when they materially improve accuracy. If attachments are present, analyze them directly. "
-        "Do not claim live external freshness unless a web-capable tool was actually used."
+        "You are AIger General Chat. Stay grounded to the provided workspace sources, attachments, and retrieved knowledge. "
+        "If the question requires facts that are not supported by the grounded sources, politely refuse instead of guessing. "
+        "Use tools when they materially improve accuracy, and do not claim live external freshness unless a web-capable tool was actually used."
     )
 
 
-def _prepare_conversation_messages(session: dict, user_message: str, platform_context: str, mode: str) -> list[dict]:
+def _prepare_conversation_messages(session: dict, user_message: str, grounded_context: str, mode: str, citations: list[dict]) -> list[dict]:
     history = session.get("messages", [])[-18:]
+    citation_guide = "\n".join(
+        f"[{index + 1}] {item.get('label')} ({item.get('source_type')})"
+        for index, item in enumerate(citations[:12])
+    )
     base_messages = [
         {"role": "system", "content": _system_prompt_for_mode(mode)},
         {
             "role": "system",
             "content": (
-                "Platform context and attachments follow. Treat this as grounded workspace data.\n\n"
-                f"{platform_context[:42000]}"
+                "Grounded workspace sources follow. Treat them as the only factual authority for this answer.\n\n"
+                f"{grounded_context[:42000]}"
+            ),
+        },
+        {
+            "role": "system",
+            "content": (
+                "Use concise inline citations that match the provided source list, for example [1] or [2]. "
+                "If the evidence is insufficient, respond with a brief refusal rather than speculating.\n\n"
+                f"SOURCE LIST:\n{citation_guide or '[1] No grounded source available'}"
             ),
         },
     ]
@@ -496,12 +665,26 @@ async def _run_chat_completion(
     model_name: str,
     preferred_tool: str | None,
     enabled_tools: list[str],
-) -> tuple[str, list[dict], list[dict]]:
+) -> tuple[str, list[dict], list[dict], list[dict]]:
     processing_logs: list[dict] = []
     _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
+    grounding_payload = await _build_grounding_payload(
+        user_id=user_id,
+        session=session,
+        user_message=user_message,
+        mode=mode,
+        model_name=model_name,
+        logs=processing_logs,
+    )
     platform_context = await _build_platform_context(user_id=user_id, session=session)
-    _log_step(processing_logs, "Ground workspace", "Loaded platform docs, installed agents, marketplace templates, tools, and chat attachments.")
-    messages = _prepare_conversation_messages(session, user_message, platform_context, mode)
+    combined_context = "\n\n".join([platform_context, *(grounding_payload.get("context_sections") or [])])
+    citations = grounding_payload.get("citations") or []
+    if not citations:
+        refusal = "I can only answer from grounded AIger sources right now, and I do not have enough evidence for that request."
+        _log_step(processing_logs, "Refuse safely", "No grounded sources were available for this request, so the assistant refused instead of guessing.")
+        return refusal, [], processing_logs, []
+    _log_step(processing_logs, "Ground workspace", f"Prepared {len(citations)} grounded citations across live docs, attachments, and knowledge sources.")
+    messages = _prepare_conversation_messages(session, user_message, combined_context, mode, citations)
     _log_step(processing_logs, "Prepare prompt", f"Prepared {len(messages)} conversation messages for model inference.")
     tools_payload = [TOOL_SCHEMAS[name] for name in enabled_tools if name in TOOL_SCHEMAS]
     tools_payload.extend(CHAT_NATIVE_TOOL_SCHEMAS.values())
@@ -547,7 +730,8 @@ async def _run_chat_completion(
     else:
         _log_step(processing_logs, "Synthesize answer", "Responded directly from conversation memory and grounded context.")
 
-    return content, tool_results, processing_logs
+    citations.extend(_extract_citations_from_tool_results(tool_results))
+    return content, tool_results, processing_logs, _dedupe_citations(citations)
 
 
 async def _stream_llm_content(messages: list[dict], model_name: str, user_id: str):
@@ -700,7 +884,7 @@ async def send_session_message(session_id: str, request: Request, body: ChatMess
     model_name = body.model_name or session.get("model_name") or settings.LLM_MODEL
     enabled_tools = _normalize_tool_names(body.enabled_tools or session.get("enabled_tools"))
     preferred_tool = _normalize_preferred_tool(body.preferred_tool) if body.preferred_tool is not None else _normalize_preferred_tool(session.get("preferred_tool"))
-    response_text, tool_results, processing_logs = await _run_chat_completion(
+    response_text, tool_results, processing_logs, citations = await _run_chat_completion(
         user_id=user_id,
         session=session,
         user_message=body.content.strip(),
@@ -709,7 +893,6 @@ async def send_session_message(session_id: str, request: Request, body: ChatMess
         preferred_tool=preferred_tool,
         enabled_tools=enabled_tools,
     )
-    citations = _extract_citations_from_tool_results(tool_results)
     follow_up_questions = await _generate_follow_up_questions(
         user_id=user_id,
         mode=mode,
@@ -765,11 +948,59 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
         _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
         yield _sse_event("log", processing_logs[-1])
 
+        grounding_payload = await _build_grounding_payload(
+            user_id=user_id,
+            session=session,
+            user_message=user_message,
+            mode=mode,
+            model_name=model_name,
+            logs=processing_logs,
+        )
+        for log in processing_logs[1:]:
+            yield _sse_event("log", log)
+        base_citations = grounding_payload.get("citations") or []
+        if not base_citations:
+            final_content = "I can only answer from grounded AIger sources right now, and I do not have enough evidence for that request."
+            _log_step(processing_logs, "Refuse safely", "No grounded sources were available for this request, so the assistant refused instead of guessing.")
+            yield _sse_event("log", processing_logs[-1])
+            follow_up_questions = await _generate_follow_up_questions(
+                user_id=user_id,
+                mode=mode,
+                model_name=model_name,
+                user_message=user_message,
+                assistant_message=final_content,
+            )
+            serialized = await _persist_session_message(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message=final_content,
+                tool_results=[],
+                citations=[],
+                processing_logs=processing_logs,
+                follow_up_questions=follow_up_questions,
+                mode=mode,
+                model_name=model_name,
+                preferred_tool=preferred_tool if preferred_tool in enabled_tools else None,
+                enabled_tools=enabled_tools,
+            )
+            yield _sse_event("final", {
+                "message_id": assistant_message_id,
+                "reply": final_content,
+                "tool_results": [],
+                "citations": [],
+                "processing_logs": processing_logs,
+                "follow_up_questions": follow_up_questions,
+                "session": serialized,
+            })
+            return
+
         platform_context = await _build_platform_context(user_id=user_id, session=session)
-        _log_step(processing_logs, "Ground workspace", "Loaded platform docs, installed agents, marketplace templates, tools, and chat attachments.")
+        combined_context = "\n\n".join([platform_context, *(grounding_payload.get("context_sections") or [])])
+        _log_step(processing_logs, "Ground workspace", f"Prepared {len(base_citations)} grounded citations across live docs, attachments, and knowledge sources.")
         yield _sse_event("log", processing_logs[-1])
 
-        messages = _prepare_conversation_messages(session, user_message, platform_context, mode)
+        messages = _prepare_conversation_messages(session, user_message, combined_context, mode, base_citations)
         _log_step(processing_logs, "Prepare prompt", f"Prepared {len(messages)} conversation messages for model inference.")
         yield _sse_event("log", processing_logs[-1])
 
@@ -827,7 +1058,7 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
                 final_content = collected
                 yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
 
-        citations = _extract_citations_from_tool_results(tool_results)
+        citations = _dedupe_citations(base_citations + _extract_citations_from_tool_results(tool_results))
         follow_up_questions = await _generate_follow_up_questions(
             user_id=user_id,
             mode=mode,
@@ -951,6 +1182,38 @@ async def upload_session_files(
     )
     session = await _load_session(session_id, user_id)
     return {"uploaded": uploaded, "session": await _serialize_session(session)}
+
+
+@router.get("/sources/{source_id:path}")
+async def get_grounded_source(source_id: str, request: Request):
+    normalized = (source_id or "").strip()
+    if normalized.startswith("platform::"):
+        relative_path = normalized.split("platform::", 1)[1].strip().replace("\\", "/")
+        for doc in _platform_doc_records():
+            if doc.get("relative_path") == relative_path:
+                return {
+                    "source_id": doc["source_id"],
+                    "label": doc["label"],
+                    "source_type": doc["source_type"],
+                    "content": doc["content"],
+                }
+        raise HTTPException(status_code=404, detail=f"Source '{source_id}' not found")
+    user_id = get_optional_user_id(request)
+    if normalized.startswith("document::") and user_id:
+        document_id = normalized.split("document::", 1)[1].strip()
+        document = await get_db()[AIGERS_DOCUMENTS].find_one(
+            {"document_id": document_id, "owner_user_id": user_id, "deleted_at": None},
+            {"_id": 0, "document_id": 1, "filename": 1, "scope": 1, "text": 1, "context_excerpt": 1},
+        )
+        if not document:
+            raise HTTPException(status_code=404, detail=f"Source '{source_id}' not found")
+        return {
+            "source_id": normalized,
+            "label": document.get("filename") or document_id,
+            "source_type": document.get("scope") or "document",
+            "content": document.get("text") or document.get("context_excerpt") or "",
+        }
+    raise HTTPException(status_code=404, detail=f"Source '{source_id}' not found")
 
 
 @router.post("/message")

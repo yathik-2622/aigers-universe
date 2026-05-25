@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
+  BookOpen,
   BrainCircuit,
   ChevronDown,
   ChevronLeft,
@@ -28,6 +29,7 @@ import { listModels, listTools } from '../api/platform.js'
 import {
   createChatSession,
   deleteChatSession,
+  fetchCitationSource,
   getChatSession,
   listChatSessions,
   streamChatMessage,
@@ -49,6 +51,17 @@ const MODES = {
       'Design the best platform workflow for contract risk review with HITL approvals.',
     ],
   },
+  knowledge: {
+    label: 'Knowledgebase RAG',
+    icon: BookOpen,
+    placeholder: 'Ask only from the indexed knowledge base, repo markdown/html docs, and attached files...',
+    starters: [
+      'Summarize the latest knowledge-base evidence for the platform architecture with citations.',
+      'What do the uploaded docs say about workflow inputs versus reusable knowledge base?',
+      'List the strongest KB evidence for AIger Copilot and HITL behavior.',
+      'Answer only from grounded sources and refuse if the docs do not cover it.',
+    ],
+  },
   general: {
     label: 'General Reasoning',
     icon: BrainCircuit,
@@ -63,6 +76,50 @@ const MODES = {
 }
 
 const HISTORY_KEY = 'aigers.copilot.history.collapsed'
+const MODE_WELCOME_VARIANTS = {
+  platform: [
+    {
+      title: 'AIger Copilot is online',
+      body: 'Ask about the AIger platform itself: architecture, orchestrator design, agents, HITL, A2A, reports, and the best workflow shape for your use case.',
+    },
+    {
+      title: 'Platform copilot ready',
+      body: 'This mode stays focused on AIger product knowledge and the latest repo docs, so it can map your use case to what the platform really supports today.',
+    },
+    {
+      title: 'AIger platform guide active',
+      body: 'Use this when you want truthful answers about how AIger works, which agents to use, and how to structure workflows without mixing in private KB content.',
+    },
+  ],
+  knowledge: [
+    {
+      title: 'Knowledgebase RAG is grounded',
+      body: 'This mode combines live AIger docs with your allowed knowledge-base sources, cites every answer, and refuses when the evidence is missing.',
+    },
+    {
+      title: 'KB evidence mode ready',
+      body: 'Ask for grounded summaries, technical comparisons, or architecture guidance backed by public KB and your own private KB only.',
+    },
+    {
+      title: 'Retriever stack warmed up',
+      body: 'Multi-query retrieval, MMR, and compression run automatically here so you can ask broader questions and still get citation-backed answers.',
+    },
+  ],
+  general: [
+    {
+      title: 'General Reasoning is ready',
+      body: 'Use this for broader technical reasoning, workflow design, and tool-assisted research, while still keeping responses grounded and cited.',
+    },
+    {
+      title: 'Reasoning workspace active',
+      body: 'This mode can think across platform context, public KB, and available tools without using anyone\'s private knowledge base.',
+    },
+    {
+      title: 'Architecture and planning mode ready',
+      body: 'Ask for migration plans, orchestrator prompts, and implementation guidance with grounded references instead of free-form guessing.',
+    },
+  ],
+}
 
 function formatSessionTime(value) {
   if (!value) return ''
@@ -71,6 +128,13 @@ function formatSessionTime(value) {
   } catch {
     return value
   }
+}
+
+function stableIndex(seed, size) {
+  const source = String(seed || 'draft')
+  let hash = 0
+  for (let index = 0; index < source.length; index += 1) hash = (hash * 31 + source.charCodeAt(index)) >>> 0
+  return size > 0 ? hash % size : 0
 }
 
 function buildAssistantDraft(messageId, mode, modelName) {
@@ -161,7 +225,7 @@ function MessageMeta({ message }) {
     : message.preferred_tool
       ? `${message.preferred_tool} requested`
       : 'auto / none'
-  const modeLabel = message.mode === 'general' ? 'General' : 'AIger Copilot'
+  const modeLabel = MODES[message.mode]?.label || 'AIger Copilot'
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -318,6 +382,8 @@ export default function ToolPlaygroundPage() {
   })
   const [search, setSearch] = useState('')
   const [activeCitation, setActiveCitation] = useState(null)
+  const [activeCitationContent, setActiveCitationContent] = useState(null)
+  const [loadingCitationContent, setLoadingCitationContent] = useState(false)
   const [activeReasoningMessageId, setActiveReasoningMessageId] = useState('')
   const [renamingSessionId, setRenamingSessionId] = useState('')
   const [renameDraft, setRenameDraft] = useState('')
@@ -332,6 +398,27 @@ export default function ToolPlaygroundPage() {
   useEffect(() => {
     try { localStorage.setItem(HISTORY_KEY, historyCollapsed ? '1' : '0') } catch {}
   }, [historyCollapsed])
+
+  useEffect(() => {
+    let mounted = true
+    if (!activeCitation?.content_url) {
+      setActiveCitationContent(null)
+      setLoadingCitationContent(false)
+      return () => { mounted = false }
+    }
+    setLoadingCitationContent(true)
+    fetchCitationSource(activeCitation.content_url)
+      .then((payload) => {
+        if (mounted) setActiveCitationContent(payload)
+      })
+      .catch(() => {
+        if (mounted) setActiveCitationContent(null)
+      })
+      .finally(() => {
+        if (mounted) setLoadingCitationContent(false)
+      })
+    return () => { mounted = false }
+  }, [activeCitation])
 
   useEffect(() => {
     let mounted = true
@@ -411,6 +498,10 @@ export default function ToolPlaygroundPage() {
     () => (session?.messages || []).find((item) => item.message_id === activeReasoningMessageId) || null,
     [activeReasoningMessageId, session?.messages],
   )
+  const welcomeCard = useMemo(() => {
+    const options = MODE_WELCOME_VARIANTS[currentMode] || MODE_WELCOME_VARIANTS.platform
+    return options[stableIndex(`${activeSessionId || currentMode}:${session?.created_at || ''}`, options.length)] || options[0]
+  }, [activeSessionId, currentMode, session?.created_at])
 
   const syncSessionPreview = (sessionId, patch) => {
     setSessions((prev) => prev.map((item) => (item.session_id === sessionId ? { ...item, ...patch } : item)))
@@ -728,7 +819,11 @@ export default function ToolPlaygroundPage() {
         {!historyCollapsed && <div className="px-4 pb-2 text-xs uppercase tracking-[0.22em] text-muted">Recents</div>}
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">
           {!historyCollapsed && visibleSessions.map((item) => {
-            const Icon = item.mode === 'general' ? BrainCircuit : Sparkles
+            const Icon = item.mode === 'general'
+              ? BrainCircuit
+              : item.mode === 'knowledge'
+                ? BookOpen
+                : Sparkles
             const active = activeSessionId === item.session_id
             return (
               <div key={item.session_id} className={`group relative mb-1.5 rounded-2xl transition ${active ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}`}>
@@ -737,7 +832,7 @@ export default function ToolPlaygroundPage() {
                   onClick={() => openSession(item.session_id)}
                   className="flex w-full items-start gap-3 px-3 py-3 pr-20 text-left"
                 >
-                  <Icon size={14} className={`mt-0.5 shrink-0 ${item.mode === 'general' ? 'text-accent2' : 'text-accent'}`} />
+                  <Icon size={14} className={`mt-0.5 shrink-0 ${item.mode === 'general' ? 'text-accent2' : item.mode === 'knowledge' ? 'text-emerald-300' : 'text-accent'}`} />
                   <div className="min-w-0 flex-1">
                     {renamingSessionId === item.session_id ? (
                       <input
@@ -796,7 +891,8 @@ export default function ToolPlaygroundPage() {
                 <div className="mb-8 text-center">
                   <div className="font-display text-[clamp(2rem,5vw,3.6rem)] tracking-[-0.045em]">What should AIger help you solve?</div>
                   <div className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-muted">
-                    Use platform mode for grounded answers about AIger, its architecture, agents, and workflows. Switch to general reasoning when you want broader coding or migration help.
+                    <span className="block text-ink">{welcomeCard.title}</span>
+                    <span className="mt-2 block">{welcomeCard.body}</span>
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -845,6 +941,7 @@ export default function ToolPlaygroundPage() {
                   onChange={(value) => patchSession({ mode: value })}
                   className="w-[158px] max-w-full"
                   buttonClassName="min-h-[38px] rounded-full px-3 py-1.5 text-xs"
+                  menuPlacement="up"
                   maxVisibleOptions={4}
                 />
                 <CustomSelect
@@ -925,7 +1022,7 @@ export default function ToolPlaygroundPage() {
       >
         <div className="bg-elev/70 p-6">
           <div className="flex flex-wrap items-center gap-2">
-            <MetaTag label="Mode" value={activeReasoningMessage?.mode === 'general' ? 'General' : 'AIger Copilot'} />
+            <MetaTag label="Mode" value={MODES[activeReasoningMessage?.mode]?.label || 'AIger Copilot'} />
             <MetaTag label="Model" value={activeReasoningMessage?.model_name || 'gpt-4o'} />
             <MetaTag label="State" value={activeReasoningMessage?.streaming ? 'streaming' : 'complete'} />
           </div>
@@ -961,26 +1058,60 @@ export default function ToolPlaygroundPage() {
 
       <ModalShell
         open={!!activeCitation}
-        onClose={() => setActiveCitation(null)}
+        onClose={() => {
+          setActiveCitation(null)
+          setActiveCitationContent(null)
+        }}
         title={activeCitation?.label || 'Citation'}
         subtitle={activeCitation?.source_type || 'Source reference'}
         width="max-w-3xl"
       >
         {activeCitation && (
           <div className="bg-elev/70 p-6">
-            {activeCitation.url && (
-              <a
-                href={activeCitation.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/10 px-3 py-1.5 text-xs text-accent transition hover:opacity-90"
+            <div className="flex flex-wrap items-center gap-2">
+              {activeCitation.url && (
+                <a
+                  href={activeCitation.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/10 px-3 py-1.5 text-xs text-accent transition hover:opacity-90"
+                >
+                  <Globe2 size={12} />
+                  Open source
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => copyText(activeCitation.excerpt || '')}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted transition hover:border-accent/30 hover:text-ink"
               >
-                <Globe2 size={12} />
-                Open source
-              </a>
-            )}
+                <Copy size={12} />
+                Copy excerpt
+              </button>
+              <button
+                type="button"
+                onClick={() => copyText(activeCitationContent?.content || '')}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted transition hover:border-accent/30 hover:text-ink"
+              >
+                <Copy size={12} />
+                Copy opened source
+              </button>
+            </div>
             <div className="mt-5">
               <MarkdownReport markdown={activeCitation.excerpt || 'No excerpt available.'} />
+            </div>
+            <div className="mt-5 rounded-2xl border border-white/10 bg-panel/70 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Opened source</div>
+              <div className="mt-3">
+                {loadingCitationContent ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-muted">
+                    <LoaderCircle size={14} className="animate-spin text-accent" />
+                    Loading source content...
+                  </div>
+                ) : (
+                  <MarkdownReport markdown={activeCitationContent?.content || 'No additional source content available.'} />
+                )}
+              </div>
             </div>
           </div>
         )}

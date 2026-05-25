@@ -211,6 +211,9 @@
         Aigers Universe is an enterprise AI platform for registering agents, composing workflows, grounding them with tools and documents,
         routing work through A2A, pausing for HITL approval, and observing every run through reports, traces, and live execution views.
       </p>
+      <p class="lead">
+        Recent platform updates include the in-app <strong>Platform Docs</strong> page, now redesigned as a richer engineering-atlas experience, legacy galaxy-style knowledge graph restoration with toggleable semantic edges, provider-aware observability pricing, duplicate-safe knowledge ingest, and a more capable workflow orchestrator with citations and best-effort live market research.
+      </p>
       <div class="pill-list">
         <span class="pill">38 seeded marketplace templates</span>
         <span class="pill">19 tools and control actions</span>
@@ -333,7 +336,7 @@
           <tr>
             <td><strong>Observability</strong></td>
             <td>Charts and traces.</td>
-            <td>Shows tokens, latency, cost, and recent execution traces.</td>
+            <td>Shows tokens, latency, cost, recent execution traces, and delete controls for workflow history.</td>
           </tr>
         </tbody>
       </table>
@@ -440,10 +443,12 @@ Execution
     <section class="section">
       <h2>8. AIger Copilot</h2>
       <ul>
-        <li>Supports <code>AIger Copilot</code> mode and <code>General Reasoning</code> mode.</li>
-        <li>Supports session history, rename, delete, grounded attachments, citations, and trace logs.</li>
+        <li>Supports <code>AIger Copilot</code>, <code>Knowledgebase RAG</code>, and <code>General Reasoning</code> modes.</li>
+        <li>Knowledgebase mode automatically runs MultiQuery retrieval, MMR reranking, and contextual compression over indexed KB chunks.</li>
+        <li>Supports session history, rename, delete, grounded attachments, citations, trace logs, and grounded refusal when evidence is missing.</li>
         <li>Supports explicit user-controlled tool selection including <code>Auto tool</code>.</li>
-        <li>Uses a compact composer for mode, model, tool, files, and send only.</li>
+        <li>Uses a compact composer for mode, model, tool, files, and send only, and citation pills open real source content.</li>
+        <li>Chat history now uses distinct icons per mode and citation viewers support copy actions for both the excerpt and the opened source.</li>
       </ul>
     </section>
 
@@ -481,27 +486,30 @@ npm run start</pre>
     </section>
 
     <section class="section">
-      <h2>12. 2D/3D Knowledge Graph and Chunking Runtime</h2>
+      <h2>12. Knowledge Graph and Chunking Runtime</h2>
       <div class="two-col">
         <article class="card">
           <h3>Knowledge Graph UI</h3>
-          <p>The platform now includes a dedicated <code>Knowledge Graph</code> page with:</p>
+          <p>The platform now includes a dedicated <code>Knowledge Graph</code> page built on the restored multidimensional galaxy canvas with:</p>
           <ul>
-            <li>2D/3D rendering toggle using shared graph data</li>
-            <li>Main, sub, and chunk node layers</li>
-            <li>Similarity-weighted semantic links</li>
-            <li>Sector legend isolation filters</li>
-            <li>Node drag and persisted layout save</li>
+            <li>the restored multidimensional galaxy canvas as the primary view</li>
+            <li>toggleable structural and semantic neon edges</li>
+            <li>main, sub, and chunk node layers</li>
+            <li>cross-category semantic links driven by chunk-vector similarity</li>
+            <li>node drag, safer focus framing, and persisted layout save</li>
           </ul>
         </article>
         <article class="card">
           <h3>Chunking Strategies</h3>
-          <p>Document ingestion supports four strategy options:</p>
+          <p>Document ingestion now supports seven strategy options:</p>
           <ul>
-            <li><code>hierarchical</code></li>
-            <li><code>fixed-token</code></li>
-            <li><code>sentence-window</code></li>
-            <li><code>semantic</code></li>
+            <li><code>section-aware-large</code></li>
+            <li><code>page-based-large</code></li>
+            <li><code>sliding-window</code></li>
+            <li><code>code-aware</code></li>
+            <li><code>table-first</code></li>
+            <li><code>markdown</code></li>
+            <li><code>semantic-topic</code></li>
           </ul>
           <p>Each uploaded document stores the selected strategy in metadata as <code>chunk_strategy</code>.</p>
         </article>

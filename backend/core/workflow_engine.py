@@ -297,6 +297,8 @@ async def _execute_agent_step(state: WorkflowState, step_idx: int) -> dict:
         tokens_used=result.get("tokens_used", 0),
         prompt_tokens=result.get("prompt_tokens", 0),
         completion_tokens=result.get("completion_tokens", 0),
+        model_name=result.get("model_name") or agent_config.get("model_name", ""),
+        provider=result.get("provider") or "gateway",
         latency_ms=result.get("latency_ms", 0.0),
         tools_called=result.get("tools_called", []),
         status=result.get("status", "success"),

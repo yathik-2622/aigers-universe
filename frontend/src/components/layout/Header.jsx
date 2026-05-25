@@ -11,6 +11,7 @@ const TITLES = {
   '/tools-chat': { title: 'AIger Copilot', subtitle: 'Platform-aware chat with models, MCP tools, file context, and agent guidance.' },
   '/knowledge-base': { title: 'Knowledge Base', subtitle: 'Upload reusable documents, manage visibility, and explore semantic graph structure.' },
   '/knowledge-graph': { title: 'Knowledge Graph', subtitle: 'Explore semantic document clusters and chunk-level similarity links in 2D/3D.' },
+  '/platform-docs': { title: 'Platform Documentation', subtitle: 'Implementation logic, tech stack, and page-by-page system behavior.' },
   '/runs': { title: 'Workflow Run', subtitle: 'Live execution, resumable steps, and readable reports.' },
   '/hitl': { title: 'Human-in-the-Loop', subtitle: 'Review and approve paused workflows.' },
   '/observability': { title: 'Observability', subtitle: 'Traces, tokens, latency, and cost across all runs.' },

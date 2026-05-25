@@ -41,6 +41,7 @@ export const ingestDocuments = (documentIds) => api.post('/documents/ingest', {
 export const ingestDocument = (documentId) => api.post(`/documents/${documentId}/ingest`).then((r) => r.data)
 
 export const deleteDocument = (documentId) => api.delete(`/documents/${documentId}`).then((r) => r.data)
+export const updateDocumentVisibility = (documentId, visibility) => api.patch(`/documents/${documentId}/visibility`, { visibility }).then((r) => r.data)
 
 export const importGithubRepo = (repoUrl, category = 'repo-context', options = {}) => {
   const form = new FormData()

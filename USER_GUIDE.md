@@ -5,6 +5,15 @@
 
 This guide takes you from cold start to a fully observable multi-agent run. On your first read-through, follow the steps in order; afterwards, jump to whichever section you need.
 
+## Recent additions
+
+- `Knowledge Ingest` now lets you remove selected files before upload, apply the same category, subcategory, visibility, and chunking metadata to both files and GitHub repo ingest, and surfaces duplicate guidance without browser alerts.
+- `AIger Copilot` history now uses distinct mode icons for `AIger Copilot`, `Knowledgebase RAG`, and `General Reasoning`.
+- `Knowledge Graph` keeps the older galaxy-style canvas while adding toggleable semantic and structural edges, cross-category semantic links, and safer camera framing on node focus.
+- `Observability` now shows provider-aware token cost estimates when model pricing is available, keeps traces visible even when exact pricing is unavailable, and lets operators delete workflow history rows from the page.
+- `Workflow Builder` now shows an orchestrator log, planner citations, custom-agent draft suggestions, best-effort live market-research findings, and the real active build phase while planning is running.
+- A new sidebar page, `Platform Docs`, appears after `Observability` and explains how the platform is implemented from dashboard through settings.
+
 ---
 
 ## What is AIger's Universe?
@@ -218,6 +227,8 @@ Click **Observability** in the sidebar.
 ![Observability](./docs/screenshots/07-observability.jpeg)
 
 - **4 KPI cards**: total runs · total tokens · avg latency (ms) · estimated cost ($).
+- Recent traces now include provider, model, token count, and per-trace cost when pricing data is available.
+- If a trace uses a model whose pricing could not be resolved, the dashboard shows that explicitly instead of inventing a number.
 - **Token Usage by Agent** (Recharts bar) — shows your cost distribution.
 - **Avg Latency by Agent** (Recharts bar) — shows your performance distribution.
 - **Workflow Runs Over Time** (Recharts line) — daily run volume.
@@ -240,12 +251,15 @@ Click **Observability** in the sidebar.
 ### AIger Copilot
 - Session-based workspace chat with persistent history and delete/reopen management.
 - Inline rename and delete controls are available directly from chat history.
-- Two guarded modes:
+- Three guarded modes:
   - `AIger Copilot` for answers grounded in this exact platform, its docs, installed agents, marketplace templates, MCP tools, workflows, A2A, KB, HITL, and operating patterns.
+  - `Knowledgebase RAG` for answers grounded only in indexed KB chunks, live repo markdown/html docs, and attached files. This mode automatically runs MultiQuery retrieval, MMR reranking, and contextual compression before synthesis.
   - `General Reasoning` for broader coding, architecture, debugging, and planning help.
 - Mode, model, and preferred-tool controls now live inside the composer area instead of a side panel.
 - Chat attachments are session-scoped and support up to the configured limit.
 - Assistant replies now stream live from the backend and can show backend-generated processing logs, source citations, and follow-up questions.
+- If grounded evidence is missing, Copilot refuses politely instead of guessing.
+- Citation pills open the actual grounded source content from repo docs, KB documents, or attached files.
 - The copilot can recommend which agents to install, which MCP tools to use, what workflow order to build, and what inputs belong in workflow uploads versus reusable KB.
 
 ### Dashboard

@@ -37,7 +37,9 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - AIger Copilot for session-based chat interaction with MCP tools, installed agents, marketplace guidance, and platform-aware workflow recommendations.
 - Knowledge-base uploads now support categories, broader text/code/document formats, and GitHub repository import for modernization-style use cases.
 - AIger Copilot now replaces the old MCP Studio as a session-based chat workspace with history, mode guardrails, model/tool selection, chat-scoped file attachments, installed-agent awareness, and platform-grounded guidance.
-- AIger Copilot now includes collapsible history, inline rename/delete controls, backend-streamed responses, live reasoning logs, follow-up question suggestions, citations with popup previews, and a lighter chat-first UX.
+- AIger Copilot now includes `AIger Copilot`, `Knowledgebase RAG`, and `General Reasoning` modes with backend-streamed responses, live reasoning logs, and grounded refusal behavior when evidence is missing.
+- Knowledgebase mode now runs automatic MultiQuery retrieval, MMR ranking, and contextual compression over indexed KB chunks before answer synthesis.
+- Citations now open real grounded content from repo markdown/html docs, KB documents, or attached chat files instead of only showing labels.
 - Marketplace agents now default to `gpt-4o`, while each signed-in user can override provider, keys, base URL, default model, and theme from the in-app Settings page.
 - The landing page now uses a cleaner cyberpunk product layout with less crowding and more direct feature communication.
 - Workflow Builder now separates reusable KB context from run-scoped workflow inputs: text, uploaded files, and GitHub repo snapshots.
@@ -62,11 +64,15 @@ A generic, domain-agnostic and framework-agnostic platform for registering AI ag
 - Agent model selection from the gateway model catalog.
 - Runtime settings now support OpenAI-compatible gateways, OpenRouter, Groq, and NVIDIA model discovery with per-user secrets stored in MongoDB.
 - AI responses now render structured JSON, markdown tables, code fences, and Mermaid `erDiagram` content in the UI instead of collapsing everything into plain text.
-- New Knowledge Graph page supports 2D/3D semantic document visualization, category isolation, neighbor highlighting, and persisted node layout.
+- Knowledge Graph now keeps the legacy multidimensional galaxy experience, adds toggleable semantic and structural neon edges, supports semantic links across categories, and frames clicked nodes back into view instead of over-zooming.
 - Document uploads now support selectable HCKB chunking strategies (`section-aware-large`, `page-based-large`, `sliding-window`, `code-aware`, `table-first`, `markdown`, `semantic-topic`) with stored `chunk_strategy` metadata.
+- Knowledge Ingest now supports file deselection, shared metadata for file + repo ingest, and duplicate-safe public/private guidance instead of browser alerts.
 - Copilot page now respects light theme shell styling instead of remaining visually dark-only.
 - Mongo-backed workflow resume after interruption or backend restart.
 - Migration marketplace now includes framework-native CrewAI and Agno templates for Java, Spring Boot, Python, Streamlit, React, Next.js, and .NET modernization tasks.
+- Observability cost tracking now uses runtime provider pricing when available and official token pricing fallbacks for supported gateway/OpenAI models, while keeping unpriced traces visible without inventing costs. Workflow history can also be deleted from the Observability page.
+- Workflow Builder orchestration now includes planner citations, best-effort live market research, suggested agent drafts, and an on-canvas orchestrator log that surfaces the real active build phase while planning is running.
+- A new in-app `Platform Docs` page, placed after `Observability` in the sidebar, explains the actual frontend/backend implementation page by page with a more immersive engineering-atlas UX.
 
 > **Yes — this _is_ a drag-and-drop application.** Open the **Workflow Builder** page and drag agent cards from the left rail onto the ReactFlow canvas to compose pipelines. The drag-and-drop is _specifically_ for orchestrating AI agents (not a general Bubble-style page builder).
 

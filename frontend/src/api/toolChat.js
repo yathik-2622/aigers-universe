@@ -16,6 +16,12 @@ export const uploadChatFiles = (id, files, category = 'chat-input') => {
   }).then((r) => r.data)
 }
 
+export const fetchCitationSource = (contentUrl) => {
+  const target = (contentUrl || '').replace(/^\/api/, '') || ''
+  if (!target) return Promise.resolve(null)
+  return api.get(target).then((r) => r.data)
+}
+
 export async function streamChatMessage(id, body, handlers = {}) {
   const baseURL = import.meta.env.VITE_REACT_APP_BACKEND_URL || ''
   let token = ''
@@ -33,6 +39,10 @@ export async function streamChatMessage(id, body, handlers = {}) {
     body: JSON.stringify(body),
   })
   if (!response.ok || !response.body) {
+    if (response.status === 401) {
+      try { localStorage.removeItem('aigers.auth') } catch {}
+      if (window.location.pathname !== '/login') window.location.assign('/login')
+    }
     const text = await response.text()
     throw new Error(text || 'Stream request failed')
   }
