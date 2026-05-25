@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowRight,
@@ -463,6 +463,18 @@ function PageSection({ section }) {
 export default function PlatformDocumentationPage() {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('all')
+  const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false)
+  const surfaceMenuRef = useRef(null)
+
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      if (!surfaceMenuRef.current?.contains(event.target)) {
+        setSurfaceMenuOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [])
 
   const filteredSections = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -486,20 +498,24 @@ export default function PlatformDocumentationPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#020814] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_22%),radial-gradient(circle_at_15%_20%,rgba(96,165,250,0.10),transparent_26%),radial-gradient(circle_at_85%_10%,rgba(16,185,129,0.08),transparent_18%),linear-gradient(180deg,#030915_0%,#07111d_38%,#040913_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_22%),radial-gradient(circle_at_15%_20%,rgba(96,165,250,0.10),transparent_26%),radial-gradient(circle_at_80%_12%,rgba(217,70,239,0.12),transparent_18%),radial-gradient(circle_at_88%_24%,rgba(251,146,60,0.08),transparent_14%),linear-gradient(180deg,#030915_0%,#07111d_38%,#040913_100%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-50" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px)', backgroundSize: '24px 24px' }} />
       <div className="pointer-events-none absolute left-[-120px] top-24 h-72 w-72 rounded-full border border-cyan-300/10 bg-cyan-300/8 blur-3xl" />
       <div className="pointer-events-none absolute right-[-80px] top-56 h-64 w-64 rounded-full border border-blue-300/10 bg-blue-300/8 blur-3xl" />
+      <div className="pointer-events-none absolute left-0 right-0 top-24 h-px bg-gradient-to-r from-transparent via-cyan-300/55 to-transparent" />
+      <div className="pointer-events-none absolute left-0 right-0 top-28 h-px bg-gradient-to-r from-transparent via-fuchsia-300/35 to-transparent" />
 
       <div className="relative z-10 mx-auto max-w-[1400px] px-5 py-8 sm:px-8 lg:px-10">
-        <section className="overflow-hidden rounded-[36px] border border-white/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] sm:px-8">
+        <section className="overflow-hidden rounded-[36px] border border-cyan-300/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] sm:px-8">
+          <div className="pointer-events-none absolute right-6 top-6 h-12 w-12 border-r border-t border-cyan-300/30" />
+          <div className="pointer-events-none absolute bottom-6 left-6 h-12 w-12 border-b border-l border-fuchsia-300/24" />
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.24em] text-cyan-100/80">
               <Compass size={12} />
               AIger engineering atlas
             </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5 text-[11px] uppercase tracking-[0.18em] text-white/55">
-              3D space inspired documentation surface
+            <span className="inline-flex items-center gap-2 rounded-full border border-fuchsia-300/18 bg-fuchsia-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/75">
+              Cyberpunk 3D documentation surface
             </span>
           </div>
 
@@ -554,7 +570,7 @@ export default function PlatformDocumentationPage() {
               'The documentation surface itself now behaves like a navigable engineering atlas with depth, layered glow, collapsible snippets, and route-level structure.',
             ]}
           />
-          <div className="rounded-[30px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_16px_50px_rgba(0,0,0,0.2)]">
+          <div className="rounded-[30px] border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(7,18,32,0.94),rgba(8,12,24,0.92))] p-5 shadow-[0_16px_50px_rgba(0,0,0,0.2)]">
             <div className="flex flex-wrap items-center gap-3">
               <label className="relative min-w-[280px] flex-1">
                 <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cyan-100/55" />
@@ -565,19 +581,51 @@ export default function PlatformDocumentationPage() {
                   className="w-full rounded-2xl border border-white/10 bg-[#071220]/90 px-11 py-3 text-sm text-white outline-none transition focus:border-cyan-300/40"
                 />
               </label>
-              <div className="min-w-[220px] flex-1 rounded-2xl border border-white/10 bg-[#071220]/90 p-1">
-                <select
-                  value={selected}
-                  onChange={(event) => setSelected(event.target.value)}
-                  className="w-full bg-transparent px-3 py-2 text-sm text-white outline-none"
+              <div ref={surfaceMenuRef} className="relative min-w-[220px] flex-1">
+                <button
+                  type="button"
+                  onClick={() => setSurfaceMenuOpen((open) => !open)}
+                  className="flex w-full items-center justify-between rounded-2xl border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(14,24,42,0.94),rgba(8,13,24,0.94))] px-4 py-3 text-left shadow-[0_0_32px_rgba(34,211,238,0.08)] transition hover:border-cyan-300/35"
                 >
-                  <option value="all">All surfaces</option>
-                  {DOC_SECTIONS.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.title}
-                    </option>
-                  ))}
-                </select>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-100/55">Neural route filter</div>
+                    <div className="mt-1 text-sm text-white">{selected === 'all' ? 'All surfaces' : DOC_SECTIONS.find((section) => section.id === selected)?.title}</div>
+                  </div>
+                  <ChevronDown size={16} className={`text-cyan-100/70 transition ${surfaceMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {surfaceMenuOpen && (
+                  <div className="absolute left-0 right-0 top-[calc(100%+0.6rem)] z-30 overflow-hidden rounded-[24px] border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(6,12,24,0.98),rgba(8,16,30,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.34)]">
+                    <div className="border-b border-white/8 px-4 py-3 text-[10px] uppercase tracking-[0.22em] text-cyan-100/50">
+                      Select a product surface
+                    </div>
+                    <div className="max-h-[320px] overflow-auto p-2">
+                      {[{ id: 'all', title: 'All surfaces' }, ...DOC_SECTIONS].map((section) => {
+                        const active = selected === section.id
+                        return (
+                          <button
+                            key={section.id}
+                            type="button"
+                            onClick={() => {
+                              setSelected(section.id)
+                              setSurfaceMenuOpen(false)
+                            }}
+                            className={`mb-2 flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition last:mb-0 ${
+                              active
+                                ? 'border-cyan-300/35 bg-cyan-300/10 text-cyan-100 shadow-[0_0_26px_rgba(34,211,238,0.12)]'
+                                : 'border-white/8 bg-white/[0.03] text-slate-200 hover:border-cyan-300/20 hover:bg-cyan-300/6'
+                            }`}
+                          >
+                            <div>
+                              <div className="text-sm font-medium">{section.title}</div>
+                              <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-white/40">{section.id === 'all' ? 'Full atlas' : `/${section.route.replace(/^\//, '')}`}</div>
+                            </div>
+                            {active ? <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.95)]" /> : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -601,7 +649,17 @@ export default function PlatformDocumentationPage() {
               {filteredSections.map((section) => {
                 const Icon = section.icon
                 return (
-                  <div key={section.id} className="rounded-[24px] border border-white/10 bg-black/15 p-4 transition hover:border-cyan-300/25">
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => {
+                      setSelected(section.id)
+                      window.requestAnimationFrame(() => {
+                        document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      })
+                    }}
+                    className="rounded-[24px] border border-white/10 bg-black/15 p-4 text-left transition hover:border-cyan-300/25"
+                  >
                     <div className="flex items-center gap-3 text-cyan-100">
                       <Icon size={16} />
                       <div className="text-sm font-medium text-white">{section.title}</div>
@@ -610,7 +668,7 @@ export default function PlatformDocumentationPage() {
                     <div className="mt-4 inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-cyan-100/70">
                       Jump <ArrowRight size={12} />
                     </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>

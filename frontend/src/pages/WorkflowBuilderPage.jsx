@@ -44,7 +44,22 @@ function TypedStreamLine({ text, tone }) {
           ? 'text-cyan-200'
           : 'text-slate-200'
 
-  return <div className={`whitespace-pre-wrap ${className}`}>{text.slice(0, visibleCount)}{finished ? null : <span className="animate-pulse text-white/60">|</span>}</div>
+  const prefix = tone === 'ok'
+    ? '[OK]'
+    : tone === 'warn'
+      ? '[WARN]'
+      : tone === 'bad'
+        ? '[FAIL]'
+        : tone === 'accent'
+          ? '[LIVE]'
+          : '[INFO]'
+
+  return (
+    <div className={`grid grid-cols-[68px_1fr] gap-3 whitespace-pre-wrap ${className}`}>
+      <span className="text-[10px] uppercase tracking-[0.22em] text-white/35">{prefix}</span>
+      <span>{text.slice(0, visibleCount)}{finished ? null : <span className="animate-pulse text-white/60">|</span>}</span>
+    </div>
+  )
 }
 
 export default function WorkflowBuilderPage() {
@@ -88,6 +103,7 @@ export default function WorkflowBuilderPage() {
   const [focusedNodeId, setFocusedNodeId] = useState('')
   const fileInput = useRef(null)
   const workflowFileInput = useRef(null)
+  const streamContainerRef = useRef(null)
 
   const pushOrchestratorLine = (tone, text) => {
     setOrchestratorStream((current) => {
@@ -95,6 +111,12 @@ export default function WorkflowBuilderPage() {
       return [...current.slice(-15), line]
     })
   }
+
+  useEffect(() => {
+    const container = streamContainerRef.current
+    if (!container) return
+    container.scrollTop = container.scrollHeight
+  }, [orchestratorStream, buildPhase])
 
   const refresh = async () => {
     const [a, d, pr] = await Promise.all([listAgents(), listDocuments(), listProjects()])
@@ -281,6 +303,16 @@ export default function WorkflowBuilderPage() {
     return sorted.map((n) => n.data.agent_id).filter(Boolean)
   }, [nodes])
 
+  const isPlannerBusy = autoBuilding || installingMissing || constructingCanvas
+  const plannerStatusLabel = buildPhase || (autoBuilding
+    ? 'Planning workflow'
+    : installingMissing
+      ? 'Installing required agents'
+      : constructingCanvas
+        ? 'Constructing canvas'
+        : 'Auto-build workflow')
+  const latestOrchestratorLine = orchestratorStream[orchestratorStream.length - 1]?.text || ''
+
   const onDragStart = (e, agent) => {
     e.dataTransfer.setData('application/agent', JSON.stringify(agent))
     e.dataTransfer.effectAllowed = 'move'
@@ -442,8 +474,22 @@ export default function WorkflowBuilderPage() {
           <div className="text-[12px] text-muted mt-1">The orchestrator checks your installed agents first, then matches missing capabilities to real Marketplace templates and can install them before building the canvas.</div>
           <textarea value={autoPrompt} onChange={(e) => setAutoPrompt(e.target.value)} rows={4} placeholder="Example: Modernize this Java monolith into Spring Boot services, assess migration risk, and produce a phased remediation backlog." className="w-full mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-accent/40" />
           <button onClick={() => buildFromPrompt(false)} disabled={autoBuilding || installingMissing || constructingCanvas} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50">
-            <Sparkles size={14} /> {autoBuilding ? 'Planning workflow...' : 'Auto-build workflow'}
+            <Sparkles size={14} /> {isPlannerBusy ? plannerStatusLabel : 'Auto-build workflow'}
           </button>
+          {isPlannerBusy && (
+            <div className="mt-3 rounded-2xl border border-cyan-300/20 bg-[#08111f] px-3 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+              <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-cyan-100/65">
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.9)] animate-pulse" />
+                  Planning workflow
+                </span>
+                <span>{plannerStatusLabel}</span>
+              </div>
+              <div className="mt-2 rounded-xl border border-white/8 bg-black/20 px-3 py-2 font-mono text-[12px] leading-6 text-cyan-100">
+                {latestOrchestratorLine || `Live phase: ${plannerStatusLabel}`}
+              </div>
+            </div>
+          )}
           {autoPlan && <button onClick={() => setShowPlanModal(true)} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-white/5 text-sm hover:border-accent/40">Open planner summary</button>}
         </div>
 
@@ -615,25 +661,37 @@ export default function WorkflowBuilderPage() {
           <WorkflowCanvas initialNodes={nodes} initialEdges={edges} activeNodeId={focusedNodeId} onChange={(n, e) => { setNodes(n); setEdges(e) }} />
         </ReactFlowProvider>
         {showOrchestratorPanel && (orchestratorStream.length > 0 || constructingCanvas || autoBuilding || installingMissing) && (
-          <div className="absolute right-4 top-16 z-20 w-[min(540px,calc(100%-2rem))] rounded-[24px] border border-cyan-300/18 bg-[#07111d] px-5 py-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)]">
-            <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-cyan-200">
-              <Sparkles size={12} />
-              Orchestrator activity stream
-            </div>
-            <div className="mb-3 text-[11px] uppercase tracking-[0.18em] text-white/45">
-              {buildPhase || 'Waiting for the next orchestration step'}
-            </div>
-            <div className="max-h-[280px] space-y-2 overflow-auto pr-1 font-mono text-[12px] leading-6">
-              {orchestratorStream.map((line) => (
-                <TypedStreamLine key={line.id} text={line.text} tone={line.tone} />
-              ))}
-              {(constructingCanvas || autoBuilding || installingMissing) && (
-                <TypedStreamLine
-                  key={`phase-${buildPhase || 'active'}`}
-                  text={buildPhase ? `Live phase: ${buildPhase}` : 'Live phase: awaiting the next planner event'}
-                  tone="accent"
-                />
-              )}
+          <div className="absolute right-4 top-16 z-20 w-[min(560px,calc(100%-2rem))] overflow-hidden rounded-[24px] border border-cyan-300/18 bg-[#07111d] shadow-[0_24px_70px_rgba(0,0,0,0.34)]">
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(34,211,238,0.08),transparent_25%),repeating-linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.04)_1px,transparent_1px,transparent_28px)] opacity-70" />
+            <div className="relative z-10 px-5 py-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-cyan-200">
+                  <Sparkles size={12} />
+                  Orchestrator activity stream
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-cyan-100/80">
+                  <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.9)] animate-pulse" />
+                  Live
+                </div>
+              </div>
+              <div className="mb-3 rounded-2xl border border-white/8 bg-black/25 px-4 py-3">
+                <div className="text-[10px] uppercase tracking-[0.22em] text-white/35">Current planner phase</div>
+                <div className="mt-2 font-mono text-[13px] text-cyan-100">
+                  {buildPhase || 'Waiting for the next orchestration step'}
+                </div>
+              </div>
+              <div ref={streamContainerRef} className="max-h-[300px] space-y-2 overflow-auto rounded-2xl border border-white/8 bg-black/20 p-4 pr-3 font-mono text-[12px] leading-6">
+                {orchestratorStream.map((line) => (
+                  <TypedStreamLine key={line.id} text={line.text} tone={line.tone} />
+                ))}
+                {(constructingCanvas || autoBuilding || installingMissing) && (
+                  <TypedStreamLine
+                    key={`phase-${buildPhase || 'active'}`}
+                    text={buildPhase ? `Live phase: ${buildPhase}` : 'Live phase: awaiting the next planner event'}
+                    tone="accent"
+                  />
+                )}
+              </div>
             </div>
           </div>
         )}
