@@ -42,6 +42,7 @@ export default function WorkflowBuilderPage() {
   const [workflowInput, setWorkflowInput] = useState('')
   const [workflowFiles, setWorkflowFiles] = useState([])
   const [workflowInputDocs, setWorkflowInputDocs] = useState([])
+  const [selectedWorkflowInputDocIds, setSelectedWorkflowInputDocIds] = useState([])
   const [workflowRepoUrl, setWorkflowRepoUrl] = useState('')
   const [workflowRepoImport, setWorkflowRepoImport] = useState(null)
   const [copiedWorkflowContext, setCopiedWorkflowContext] = useState(null)
@@ -92,6 +93,7 @@ export default function WorkflowBuilderPage() {
     setSelectedKbDocIds(draft.selectedKbDocIds || [])
     setSelectedDocId(draft.selectedDocId || null)
     setWorkflowInputDocs(draft.workflowInputDocs || [])
+    setSelectedWorkflowInputDocIds(draft.selectedWorkflowInputDocIds || (draft.workflowInputDocs || []).map((doc) => doc.document_id).filter(Boolean))
     setWorkflowRepoUrl(draft.workflowRepoUrl || '')
     setWorkflowRepoImport(draft.workflowRepoImport || null)
     setCopiedWorkflowContext(draft.copiedWorkflowContext || null)
@@ -130,6 +132,7 @@ export default function WorkflowBuilderPage() {
       selectedKbDocIds,
       selectedDocId,
       workflowInputDocs,
+      selectedWorkflowInputDocIds,
       workflowRepoUrl,
       workflowRepoImport,
       copiedWorkflowContext,
@@ -140,7 +143,7 @@ export default function WorkflowBuilderPage() {
       saved_at: new Date().toISOString(),
     }
     try { localStorage.setItem(builderDraftKey(savedId || workflowId), JSON.stringify(draft)) } catch {}
-  }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, workflowRepoUrl, workflowRepoImport, copiedWorkflowContext, kbMode, docCategory, repoUrl, orchestratorStream])
+  }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, selectedWorkflowInputDocIds, workflowRepoUrl, workflowRepoImport, copiedWorkflowContext, kbMode, docCategory, repoUrl, orchestratorStream])
 
   useEffect(() => {
     if (!orchestratorLogRef.current) return
@@ -475,6 +478,7 @@ export default function WorkflowBuilderPage() {
         uploaded.push(res)
       }
       setWorkflowInputDocs((prev) => [...prev, ...uploaded])
+      setSelectedWorkflowInputDocIds((prev) => Array.from(new Set([...prev, ...uploaded.map((doc) => doc.document_id).filter(Boolean)])))
       setWorkflowFiles([])
       toast.success(`Uploaded ${uploaded.length} workflow input file${uploaded.length > 1 ? 's' : ''}`)
       return [...workflowInputDocs, ...uploaded]
@@ -563,6 +567,10 @@ export default function WorkflowBuilderPage() {
       const docId = needsKbDocument ? selectedKbDocIds[0] : ''
       const uploadedWorkflowDocs = await uploadWorkflowFilesNow()
       if (workflowFiles.length > 0 && uploadedWorkflowDocs.length === workflowInputDocs.length) return
+      const selectedWorkflowIds = selectedWorkflowInputDocIds.length > 0
+        ? selectedWorkflowInputDocIds
+        : uploadedWorkflowDocs.map((doc) => doc.document_id).filter(Boolean)
+      const selectedWorkflowDocs = uploadedWorkflowDocs.filter((doc) => selectedWorkflowIds.includes(doc.document_id))
       const workflowRepoDoc = await ensureWorkflowRepoImport()
       if (workflowRepoUrl.trim() && !workflowRepoDoc) return
       const res = await runWorkflow(id, {
@@ -575,7 +583,7 @@ export default function WorkflowBuilderPage() {
           repo_url: kbMode === 'github' ? repoUrl.trim() : '',
           workflow_inputs: {
             text: workflowInput,
-            upload_document_ids: uploadedWorkflowDocs.map((doc) => doc.document_id),
+            upload_document_ids: selectedWorkflowDocs.map((doc) => doc.document_id),
             kb_document_ids: needsKbDocument ? selectedKbDocIds : [],
             repo_document_id: workflowRepoDoc?.document_id || '',
             repo_url: workflowRepoDoc?.repo_url || workflowRepoUrl.trim(),
@@ -640,7 +648,7 @@ export default function WorkflowBuilderPage() {
                       <div className="font-mono text-accent">{run.run_id}</div>
                       <div>Status: {run.status}</div>
                       <div className="line-clamp-2">Prompt: {run.prompt || 'No prompt captured'}</div>
-                      <div>Uploaded files: {(run.uploaded_files || []).length} | KB docs: {(run.kb_document_ids || []).length}</div>
+                      <div>Uploaded files: {run.uploaded_file_count ?? (run.uploaded_files || []).length} | KB docs: {run.kb_document_count ?? (run.kb_documents || []).length}</div>
                       {run.repo_url && <div className="truncate">Repo: {run.repo_url}</div>}
                     </div>
                   ))}
@@ -701,8 +709,23 @@ export default function WorkflowBuilderPage() {
         </div>
         {(workflowInputDocs.length > 0 || workflowRepoImport) && (
           <div className="mb-4 space-y-1">
+            {workflowInputDocs.length > 0 && (
+              <div className="mb-2 text-[11px] text-muted">Tick files to include when rerunning this workflow.</div>
+            )}
             {workflowInputDocs.map((doc) => (
               <div key={doc.document_id} className="w-full px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 border-line bg-elev/40 text-muted">
+                <input
+                  type="checkbox"
+                  checked={selectedWorkflowInputDocIds.includes(doc.document_id)}
+                  onChange={(event) => {
+                    setSelectedWorkflowInputDocIds((current) => {
+                      if (event.target.checked) return Array.from(new Set([...current, doc.document_id]))
+                      return current.filter((id) => id !== doc.document_id)
+                    })
+                  }}
+                  className="h-3.5 w-3.5 accent-accent"
+                  title="Include this file in the next run"
+                />
                 <button onClick={() => setActiveDocumentId(doc.document_id)} className="flex items-center gap-2 truncate flex-1 text-left">
                   <FileText size={12} />
                   <span className="truncate flex-1">{doc.filename}</span>

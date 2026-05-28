@@ -285,6 +285,27 @@ function ToolActivity({ items }) {
     </div>
   )
 }
+
+function isHtmlContent(value = '') {
+  return /<!doctype html|<html[\s>]|<body[\s>]|<section[\s>]|<article[\s>]|<div[\s>]/i.test(String(value || '').trim())
+}
+
+function SourcePreview({ content }) {
+  const text = String(content || '')
+  if (!text.trim()) return <MarkdownReport markdown="No additional source content available." />
+  if (isHtmlContent(text)) {
+    return (
+      <iframe
+        title="Citation source preview"
+        sandbox=""
+        srcDoc={text}
+        className="h-[520px] w-full rounded-xl border border-white/10 bg-white"
+      />
+    )
+  }
+  return <MarkdownReport markdown={text} />
+}
+
 function AssistantMessage({ message, onCopy, onRegenerate, onOpenCitation, onFollowUp }) {
   return (
     <div className="mx-auto w-full max-w-4xl py-7">
@@ -352,6 +373,7 @@ export default function ToolPlaygroundPage() {
   const [activeCitation, setActiveCitation] = useState(null)
   const [activeCitationContent, setActiveCitationContent] = useState(null)
   const [loadingCitationContent, setLoadingCitationContent] = useState(false)
+  const [citationSourceCache, setCitationSourceCache] = useState({})
   const [renamingSessionId, setRenamingSessionId] = useState('')
   const [renameDraft, setRenameDraft] = useState('')
   const [draftMode, setDraftMode] = useState('platform')
@@ -368,15 +390,29 @@ export default function ToolPlaygroundPage() {
 
   useEffect(() => {
     let mounted = true
-    if (!activeCitation?.content_url) {
+    const contentUrl = activeCitation?.content_url || ''
+    if (!contentUrl) {
       setActiveCitationContent(null)
       setLoadingCitationContent(false)
       return () => { mounted = false }
     }
+    if (!contentUrl.startsWith('/api/')) {
+      setActiveCitationContent({ content: activeCitation.excerpt || '', label: activeCitation.label, source_type: activeCitation.source_type })
+      setLoadingCitationContent(false)
+      return () => { mounted = false }
+    }
+    if (citationSourceCache[contentUrl]) {
+      setActiveCitationContent(citationSourceCache[contentUrl])
+      setLoadingCitationContent(false)
+      return () => { mounted = false }
+    }
     setLoadingCitationContent(true)
-    fetchCitationSource(activeCitation.content_url)
+    fetchCitationSource(contentUrl)
       .then((payload) => {
-        if (mounted) setActiveCitationContent(payload)
+        if (mounted) {
+          setActiveCitationContent(payload)
+          setCitationSourceCache((current) => ({ ...current, [contentUrl]: payload }))
+        }
       })
       .catch((err) => {
         toast.error(apiErrorMessage(err, 'Failed to load citation source'))
@@ -386,7 +422,7 @@ export default function ToolPlaygroundPage() {
         if (mounted) setLoadingCitationContent(false)
       })
     return () => { mounted = false }
-  }, [activeCitation])
+  }, [activeCitation, citationSourceCache])
 
   useEffect(() => {
     let mounted = true
@@ -1033,7 +1069,7 @@ export default function ToolPlaygroundPage() {
                     Loading source content...
                   </div>
                 ) : (
-                  <MarkdownReport markdown={activeCitationContent?.content || 'No additional source content available.'} />
+                  <SourcePreview content={activeCitationContent?.content || activeCitation.excerpt || ''} />
                 )}
               </div>
             </div>

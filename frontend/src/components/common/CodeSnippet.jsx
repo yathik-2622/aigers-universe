@@ -49,8 +49,8 @@ function inferLanguage(code, language) {
   const text = code.trim()
   if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) return 'json'
   if (/^(curl|npm|pnpm|yarn|python|pip|uvicorn|pytest)\b/m.test(text)) return 'bash'
-  if (/^\s*(import|export|const|let|function|class)\b/m.test(text)) return 'javascript'
-  if (/^\s*(def|class|from|import)\b/m.test(text)) return 'python'
+  if (/^\s*(def|from\s+[\w.]+\s+import|import\s+[\w.]+|async\s+def|class\s+\w+[\(:])/m.test(text)) return 'python'
+  if (/^\s*(import\s+.*\s+from\s+['"]|export|const|let|function|class)\b/m.test(text)) return 'javascript'
   return 'text'
 }
 

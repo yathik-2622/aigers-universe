@@ -45,6 +45,7 @@ export default function ProjectsPage() {
   const [runs, setRuns] = useState([])
   const [currentProjectId, setCurrent] = useState(getCurrentProjectId())
   const [form, setForm] = useState({ name: '', description: '', member_emails: '' })
+  const [memberDraft, setMemberDraft] = useState('')
   const [editingId, setEditingId] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [workflowDeleteTarget, setWorkflowDeleteTarget] = useState(null)
@@ -93,6 +94,7 @@ export default function ProjectsPage() {
       toast.success(editingId ? 'Project updated' : 'Project created')
       if (project.missing_member_emails?.length) toast.error(`Unknown users: ${project.missing_member_emails.join(', ')}`)
       setForm({ name: '', description: '', member_emails: '' })
+      setMemberDraft('')
       setEditingId('')
       setCurrent(project.project_id)
       setCurrentProjectId(project.project_id)
@@ -109,6 +111,24 @@ export default function ProjectsPage() {
       description: project.description || '',
       member_emails: (project.member_emails || []).join(', '),
     })
+    setMemberDraft('')
+  }
+
+  const formMemberEmails = form.member_emails.split(',').map((value) => value.trim()).filter(Boolean)
+
+  const addMemberToForm = () => {
+    const email = memberDraft.trim().toLowerCase()
+    if (!email) return
+    const next = Array.from(new Set([...formMemberEmails, email]))
+    setForm((current) => ({ ...current, member_emails: next.join(', ') }))
+    setMemberDraft('')
+  }
+
+  const removeMemberFromForm = (email) => {
+    setForm((current) => ({
+      ...current,
+      member_emails: current.member_emails.split(',').map((value) => value.trim()).filter(Boolean).filter((value) => value.toLowerCase() !== email.toLowerCase()).join(', '),
+    }))
   }
 
   const removeProject = async () => {
@@ -143,18 +163,20 @@ export default function ProjectsPage() {
     try {
       const fullWorkflow = await getWorkflow(workflow.workflow_id)
       const workflowRuns = runs.filter((run) => run.workflow_id === workflow.workflow_id)
+      const latestRunInputs = getRunInputSummary(workflowRuns[0])
       const draft = {
         nodes: fullWorkflow.canvas?.nodes || [],
         edges: fullWorkflow.canvas?.edges || [],
         name: `${fullWorkflow.name || 'Copied workflow'} copy`,
-        workflowInput: fullWorkflow.description || '',
-        autoPrompt: fullWorkflow.description || '',
+        workflowInput: latestRunInputs.prompt || fullWorkflow.description || '',
+        autoPrompt: fullWorkflow.description || latestRunInputs.prompt || '',
         projectId: currentProjectId || fullWorkflow.project_id || '',
-        selectedKbDocIds: [],
-        selectedDocId: null,
-        workflowInputDocs: [],
-        workflowRepoUrl: '',
-        workflowRepoImport: null,
+        selectedKbDocIds: latestRunInputs.kbDocuments.map((doc) => doc.document_id).filter(Boolean),
+        selectedDocId: latestRunInputs.kbDocuments[0]?.document_id || null,
+        workflowInputDocs: latestRunInputs.uploadedFiles,
+        selectedWorkflowInputDocIds: latestRunInputs.uploadedFiles.map((doc) => doc.document_id).filter(Boolean),
+        workflowRepoUrl: latestRunInputs.repoUrl,
+        workflowRepoImport: latestRunInputs.repoDocument,
         kbMode: 'knowledge_base',
         docCategory: 'general',
         repoUrl: '',
@@ -229,6 +251,14 @@ export default function ProjectsPage() {
                       </div>
                       <div className="text-[12px] text-muted line-clamp-2 mt-1">{project.description || 'No description yet.'}</div>
                       <div className="text-[11px] text-muted mt-3 flex items-center gap-2"><Users size={12} /> {(project.member_emails || []).length} team members</div>
+                      {(project.member_emails || []).length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {(project.member_emails || []).slice(0, 6).map((email) => (
+                            <span key={email} className="rounded-full border border-white/10 bg-black/15 px-2 py-1 text-[10px] text-muted">{email}</span>
+                          ))}
+                          {(project.member_emails || []).length > 6 && <span className="rounded-full border border-white/10 bg-black/15 px-2 py-1 text-[10px] text-muted">+{project.member_emails.length - 6}</span>}
+                        </div>
+                      )}
                     </button>
                     {canManage && (
                       <div className="flex items-center gap-2">
@@ -256,10 +286,32 @@ export default function ProjectsPage() {
           <div className="space-y-3">
             <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Project name" className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-accent/40" />
             <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="What workflows does this team run here?" rows={4} className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-accent/40" />
-            <textarea value={form.member_emails} onChange={(e) => setForm((f) => ({ ...f, member_emails: e.target.value }))} placeholder="Member emails, comma separated" rows={3} className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-accent/40" />
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="mb-2 text-[11px] uppercase tracking-widest text-muted">Team members</div>
+              <div className="flex gap-2">
+                <input value={memberDraft} onChange={(e) => setMemberDraft(e.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addMemberToForm() } }} placeholder="member@company.com" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-sm outline-none focus:border-accent/40" />
+                <button type="button" onClick={addMemberToForm} className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-accent hover:bg-accent/15">Add</button>
+              </div>
+              {formMemberEmails.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {formMemberEmails.map((email) => (
+                    <span key={email} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/15 px-2 py-1 text-[11px] text-muted">
+                      {email}
+                      <button type="button" onClick={() => removeMemberFromForm(email)} className="text-muted hover:text-[#ef476f]">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <textarea value={form.member_emails} onChange={(e) => setForm((f) => ({ ...f, member_emails: e.target.value }))} placeholder="Or paste comma-separated member emails" rows={2} className="mt-3 w-full rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-xs outline-none focus:border-accent/40" />
+            </div>
             <button onClick={submit} className="w-full rounded-full bg-accent text-white text-sm font-medium py-3 inline-flex items-center justify-center gap-2">
               <Plus size={14} /> {editingId ? 'Update project' : 'Create project'}
             </button>
+            {editingId && (
+              <button type="button" onClick={() => { setEditingId(''); setForm({ name: '', description: '', member_emails: '' }); setMemberDraft('') }} className="w-full rounded-full border border-white/10 bg-white/5 py-3 text-sm text-muted hover:border-accent/30">
+                Cancel edit
+              </button>
+            )}
           </div>
         </div>
       </div>

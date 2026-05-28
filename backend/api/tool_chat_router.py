@@ -435,6 +435,37 @@ def _extract_citations_from_tool_results(tool_results: list[dict]) -> list[dict]
     return citations[:12]
 
 
+async def _general_web_research(user_id: str, query: str, logs: list[dict]) -> tuple[list[str], list[dict], list[dict]]:
+    tool_results: list[dict] = []
+    for tool_name, args in [
+        ("official_docs_search", {"provider": "all", "query": query[:220], "max_results": 3}),
+        ("wikipedia_search", {"query": query[:180], "limit": 2}),
+        ("serpapi_search", {"query": query[:220], "num": 4}),
+    ]:
+        result = await _invoke_chat_tool(tool_name, args, user_id=user_id, session_id="general_research")
+        if isinstance(result, dict) and result.get("error"):
+            continue
+        tool_results.append({"tool": tool_name, "args": args, "result": result})
+    citations = _extract_citations_from_tool_results(tool_results)
+    sections: list[str] = []
+    for item in tool_results:
+        result = item.get("result") or {}
+        entries = result.get("results") or result.get("matches") or []
+        if entries:
+            sections.append(
+                f"{item['tool'].upper()}:\n" + "\n\n".join(
+                    f"[{entry.get('title') or entry.get('name') or item['tool']}]\n{entry.get('snippet') or entry.get('excerpt') or entry.get('description') or entry.get('url') or ''}"
+                    for entry in entries[:5]
+                    if isinstance(entry, dict)
+                )
+            )
+    if citations:
+        _log_step(logs, "Research web", f"Prepared {len(citations)} web/official-doc citation(s) for general reasoning.")
+    else:
+        _log_step(logs, "Research web", "Attempted web and official-doc research, but no citeable public results were returned.", "warning")
+    return sections, citations, tool_results
+
+
 async def _build_platform_context(user_id: str, session: dict) -> str:
     db = get_db()
     installed_agents = await db.agents.find(
@@ -521,6 +552,12 @@ async def _build_grounding_payload(*, user_id: str, session: dict, user_message:
             payload["citations"].extend(attachment_citations)
             _log_step(logs, "Load attachments", f"Prepared {len(attachment_sections)} attached source documents for grounding.")
 
+    if mode == GENERAL_MODE:
+        web_sections, web_citations, web_tool_results = await _general_web_research(user_id, user_message, logs)
+        payload["context_sections"].extend(web_sections)
+        payload["citations"].extend(web_citations)
+        payload["retrieval_summary"] = {"mode": "web_first_general", "web_citations": len(web_citations), "tools": [item["tool"] for item in web_tool_results]}
+
     platform_docs = rank_platform_documents(user_message, _platform_doc_records(), top_k=5)
     if platform_docs:
         payload["context_sections"].append(
@@ -532,7 +569,7 @@ async def _build_grounding_payload(*, user_id: str, session: dict, user_message:
         payload["citations"].extend([_platform_doc_citation(doc, user_message) for doc in platform_docs])
         _log_step(logs, "Refresh platform docs", f"Loaded {len(platform_docs)} live markdown/html sources from the repository.")
 
-    include_kb = mode in {KNOWLEDGE_MODE, GENERAL_MODE}
+    include_kb = mode == KNOWLEDGE_MODE
     if include_kb:
         kb_result = await retrieve_knowledge_chunks(
             user_id=user_id,
@@ -628,7 +665,8 @@ def _system_prompt_for_mode(mode: str) -> str:
     return (
         "You are AIger General Chat, optimized for grounded technical depth. "
         "Answer with enough detail to be actionable: summarize, analyze tradeoffs, recommend next steps, and include examples when useful. "
-        "Stay grounded to the provided workspace sources, attachments, and retrieved knowledge. "
+        "Prefer current web, official documentation, Wikipedia, and attached-file citations over knowledge-base citations. "
+        "Do not use private KB evidence in general mode unless the user explicitly attaches it to this chat. "
         "If the question requires unsupported facts, say what is missing and ask for the needed source instead of guessing. "
         "Use tools when they materially improve accuracy, and do not claim live external freshness unless a web-capable tool was actually used."
     )

@@ -33,10 +33,16 @@ class UpdateProjectRequest(BaseModel):
     member_emails: list[str] | None = Field(default=None)
 
 
-def _project_scope(user_id: str, role: str | None) -> dict:
+async def _project_scope(user_id: str, role: str | None) -> dict:
     if role == "admin":
         return {}
-    return {"$or": [{"owner_user_id": user_id}, {"member_ids": user_id}]}
+    db = get_db()
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "email": 1})
+    email = (user or {}).get("email", "").strip().lower()
+    access_terms = [{"owner_user_id": user_id}, {"member_ids": user_id}]
+    if email:
+        access_terms.append({"member_emails": email})
+    return {"$or": access_terms}
 
 
 async def _resolve_member_ids(member_emails: list[str]) -> tuple[list[str], list[str]]:
@@ -56,7 +62,7 @@ async def list_projects(request: Request):
     db = get_db()
     user_id = require_user_id(request)
     role = get_optional_role(request)
-    projects = await db.projects.find(_project_scope(user_id, role), {"_id": 0}).sort("created_at", -1).to_list(500)
+    projects = await db.projects.find(await _project_scope(user_id, role), {"_id": 0}).sort("created_at", -1).to_list(500)
     return {"projects": [_json_safe(project) for project in projects], "count": len(projects)}
 
 
@@ -86,7 +92,8 @@ async def get_project(project_id: str, request: Request):
     db = get_db()
     user_id = require_user_id(request)
     role = get_optional_role(request)
-    project = await db.projects.find_one({"project_id": project_id, **_project_scope(user_id, role)}, {"_id": 0})
+    scope = await _project_scope(user_id, role)
+    project = await db.projects.find_one({"$and": [{"project_id": project_id}, scope]}, {"_id": 0})
     if not project:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
     return _json_safe(project)

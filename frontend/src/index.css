@@ -218,7 +218,11 @@ body {
 .platform-docs .scroll-reveal,
 .platform-docs .scroll-reveal-left,
 .platform-docs .scroll-reveal-right,
-.platform-docs .scroll-pop {
+.platform-docs .scroll-pop,
+.motion-page .scroll-reveal,
+.motion-page .scroll-reveal-left,
+.motion-page .scroll-reveal-right,
+.motion-page .scroll-pop {
   opacity: 0;
   animation: none;
   transition:
@@ -228,16 +232,24 @@ body {
     background-color 0.3s ease;
   will-change: opacity, transform;
 }
-.platform-docs .scroll-reveal { transform: translateY(34px); }
-.platform-docs .scroll-reveal-left { transform: translateX(-42px); }
-.platform-docs .scroll-reveal-right { transform: translateX(42px); }
-.platform-docs .scroll-pop { transform: translateY(24px) scale(0.97); }
+.platform-docs .scroll-reveal,
+.motion-page .scroll-reveal { transform: translateY(34px); }
+.platform-docs .scroll-reveal-left,
+.motion-page .scroll-reveal-left { transform: translateX(-42px); }
+.platform-docs .scroll-reveal-right,
+.motion-page .scroll-reveal-right { transform: translateX(42px); }
+.platform-docs .scroll-pop,
+.motion-page .scroll-pop { transform: translateX(42px); }
 .platform-docs .scroll-reveal.is-visible,
 .platform-docs .scroll-reveal-left.is-visible,
 .platform-docs .scroll-reveal-right.is-visible,
-.platform-docs .scroll-pop.is-visible {
+.platform-docs .scroll-pop.is-visible,
+.motion-page .scroll-reveal.is-visible,
+.motion-page .scroll-reveal-left.is-visible,
+.motion-page .scroll-reveal-right.is-visible,
+.motion-page .scroll-pop.is-visible {
   opacity: 1;
-  transform: translate3d(0, 0, 0) scale(1);
+  transform: translate3d(0, 0, 0);
 }
 .doc-type-line {
   display: inline-block;

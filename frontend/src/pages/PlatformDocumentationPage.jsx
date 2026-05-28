@@ -361,9 +361,9 @@ const ARCHITECTURE_LAYERS = [
   },
 ]
 
-function StatCard({ label, value, detail }) {
+function StatCard({ label, value, detail, direction = 'left' }) {
   return (
-    <div className="scroll-reveal border border-white/10 bg-white/[0.05] px-5 py-5 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30">
+    <div className={`${direction === 'right' ? 'scroll-reveal-right' : 'scroll-reveal-left'} border border-white/10 bg-white/[0.05] px-5 py-5 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30`}>
       <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/65">{label}</div>
       <div className="mt-3 text-3xl font-semibold text-white">{value}</div>
       <div className="mt-2 text-sm leading-6 text-slate-300">{detail}</div>
@@ -371,12 +371,12 @@ function StatCard({ label, value, detail }) {
   )
 }
 
-function DepthPanel({ title, items, accent = 'cyan' }) {
+function DepthPanel({ title, items, accent = 'cyan', direction = 'left' }) {
   const border = accent === 'amber' ? 'border-amber-300/20' : 'border-cyan-300/20'
   const glow = accent === 'amber' ? 'from-amber-300/12' : 'from-cyan-300/12'
 
   return (
-    <div className={`scroll-reveal border ${border} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)]`}>
+    <div className={`${direction === 'right' ? 'scroll-reveal-right' : 'scroll-reveal-left'} border ${border} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)]`}>
       <div className={`mb-3 rounded-full border border-white/10 bg-gradient-to-r ${glow} to-transparent px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/70`}>
         {title}
       </div>
@@ -391,12 +391,12 @@ function DepthPanel({ title, items, accent = 'cyan' }) {
   )
 }
 
-function PageSection({ section }) {
+function PageSection({ section, index = 0 }) {
   const Icon = section.icon
   return (
     <section
       id={section.id}
-      className="scroll-reveal group relative overflow-hidden border border-white/10 bg-[linear-gradient(180deg,rgba(7,15,28,0.96),rgba(4,10,20,0.94))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)] transition duration-500 hover:border-cyan-300/25"
+      className={`${index % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} group relative overflow-hidden border border-white/10 bg-[linear-gradient(180deg,rgba(7,15,28,0.96),rgba(4,10,20,0.94))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)] transition duration-500 hover:border-cyan-300/25`}
       style={{ transformStyle: 'preserve-3d' }}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.14),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(34,197,94,0.10),transparent_22%)] opacity-90" />
@@ -522,10 +522,11 @@ export default function PlatformDocumentationPage() {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
           entry.target.classList.add('is-visible')
-          observer.unobserve(entry.target)
+        } else {
+          entry.target.classList.remove('is-visible')
         }
       })
-    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' })
+    }, { threshold: 0.18, rootMargin: '-6% 0px -6% 0px' })
     revealNodes.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
   }, [filteredSections.length])
@@ -540,7 +541,7 @@ export default function PlatformDocumentationPage() {
       <div className="pointer-events-none absolute left-0 right-0 top-28 h-px bg-gradient-to-r from-transparent via-fuchsia-300/35 to-transparent" />
 
       <div className="relative z-10 mx-auto max-w-[1400px] px-5 py-8 sm:px-8 lg:px-10">
-        <section className="scroll-reveal overflow-hidden border border-cyan-300/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] transition duration-500 hover:border-cyan-300/20 sm:px-8">
+        <section className="scroll-reveal-left overflow-hidden border border-cyan-300/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] transition duration-500 hover:border-cyan-300/20 sm:px-8">
           <div className="pointer-events-none absolute right-6 top-6 h-12 w-12 border-r border-t border-cyan-300/30" />
           <div className="pointer-events-none absolute bottom-6 left-6 h-12 w-12 border-b border-l border-fuchsia-300/24" />
           <div className="flex flex-wrap items-center gap-3">
@@ -587,14 +588,14 @@ export default function PlatformDocumentationPage() {
           </div>
 
           <div className="mt-8 grid gap-4 lg:grid-cols-4">
-            <StatCard label="Product surfaces" value={String(DOC_SECTIONS.length)} detail="Documented from Dashboard through Settings, plus cross-cutting auth and admin." />
-            <StatCard label="Frameworks" value="4" detail="LangGraph, LangChain, CrewAI, and Agno are all represented in runtime and export paths." />
-            <StatCard label="Grounding lanes" value="3" detail="Platform-only, KB RAG, and General Reasoning each enforce distinct retrieval boundaries." />
-            <StatCard label="State planes" value="2" detail="Reusable KB context is separated from run-scoped workflow inputs to avoid hidden persistence." />
+            <StatCard label="Product surfaces" value={String(DOC_SECTIONS.length)} detail="Documented from Dashboard through Settings, plus cross-cutting auth and admin." direction="left" />
+            <StatCard label="Frameworks" value="4" detail="LangGraph, LangChain, CrewAI, and Agno are all represented in runtime and export paths." direction="right" />
+            <StatCard label="Grounding lanes" value="3" detail="Platform-only, KB RAG, and General Reasoning each enforce distinct retrieval boundaries." direction="left" />
+            <StatCard label="State planes" value="2" detail="Reusable KB context is separated from run-scoped workflow inputs to avoid hidden persistence." direction="right" />
           </div>
         </section>
 
-        <section className="scroll-reveal border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(5,14,26,0.96),rgba(4,9,18,0.96))] px-6 py-6 shadow-[0_26px_90px_rgba(0,0,0,0.24)]">
+        <section className="scroll-reveal-right border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(5,14,26,0.96),rgba(4,9,18,0.96))] px-6 py-6 shadow-[0_26px_90px_rgba(0,0,0,0.24)]">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-100/60">System layers</div>
@@ -624,6 +625,7 @@ export default function PlatformDocumentationPage() {
               'Observability prefers truth over cosmetic completeness: traces are kept even when exact provider pricing cannot be resolved.',
               'The documentation surface itself now behaves like a navigable engineering atlas with depth, layered glow, collapsible snippets, and route-level structure.',
             ]}
+            direction="left"
           />
           <div className="scroll-reveal-right border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(7,18,32,0.94),rgba(8,12,24,0.92))] p-5 shadow-[0_16px_50px_rgba(0,0,0,0.2)]">
             <div className="flex flex-wrap items-center gap-3">
@@ -738,6 +740,7 @@ export default function PlatformDocumentationPage() {
               'Knowledgebase RAG adds query expansion, MMR, and contextual compression before synthesis to widen recall while still trimming noisy chunks.',
               'Workflow inputs remain a separate memory plane, which avoids accidental contamination of the long-lived KB.',
             ]}
+            direction="left"
           />
           <DepthPanel
             title="Execution and observability"
@@ -747,6 +750,7 @@ export default function PlatformDocumentationPage() {
               'Delete actions are exposed in history because test-heavy teams generate many disposable runs.',
             ]}
             accent="amber"
+            direction="right"
           />
           <DepthPanel
             title="Product integrity"
@@ -755,16 +759,17 @@ export default function PlatformDocumentationPage() {
               'The builder planner can suggest new custom agents, but it still requires human acceptance before the canvas is committed.',
               'Documentation, user guide, architecture notes, and HTML handoff content are updated together so operators and developers read the same truth.',
             ]}
+            direction="left"
           />
         </section>
 
         <div className="mt-8 space-y-7">
-          {filteredSections.map((section) => (
-            <PageSection key={section.id} section={section} />
+          {filteredSections.map((section, index) => (
+            <PageSection key={section.id} section={section} index={index} />
           ))}
         </div>
 
-        <section className="scroll-pop mt-8 border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(5,11,20,0.96),rgba(10,16,32,0.94),rgba(4,9,18,0.96))] px-6 py-7 shadow-[0_30px_100px_rgba(0,0,0,0.3)]">
+        <section className="scroll-reveal-right mt-8 border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(5,11,20,0.96),rgba(10,16,32,0.94),rgba(4,9,18,0.96))] px-6 py-7 shadow-[0_30px_100px_rgba(0,0,0,0.3)]">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.22em] text-cyan-100">
@@ -784,7 +789,7 @@ export default function PlatformDocumentationPage() {
               ['Technical_architecture.md', 'Architecture brief', 'Runtime topology, planner contract, HITL, citations, state, and failure behavior.'],
               ['docs/platform-documentation.html', 'Static handoff', 'Browser-friendly reference page for external review and demos.'],
             ].map(([name, label, text], index) => (
-              <div key={name} className="scroll-pop group border border-white/10 bg-white/[0.045] p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30 hover:bg-white/[0.07]" style={{ animationDelay: `${index * 80}ms` }}>
+              <div key={name} className={`${index % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} group border border-white/10 bg-white/[0.045] p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30 hover:bg-white/[0.07]`} style={{ animationDelay: `${index * 80}ms` }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-cyan-100/60">{label}</div>

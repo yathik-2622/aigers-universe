@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -84,7 +84,7 @@ function CommandPanel() {
       </div>
       <div className="mt-4 space-y-3 font-mono text-[12px] leading-6">
         {QUICK_START.map((line, index) => (
-          <div key={line} className={`scroll-reveal ${index === 0 ? 'text-cyan-100' : 'text-slate-300'}`} style={{ animationDelay: `${index * 90}ms` }}>
+          <div key={line} className={`${index % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} ${index === 0 ? 'text-cyan-100' : 'text-slate-300'}`} style={{ animationDelay: `${index * 90}ms` }}>
             {line}
           </div>
         ))}
@@ -114,9 +114,25 @@ function SectionHeader({ eyebrow, title, body }) {
 }
 
 export default function LandingPage() {
+  useEffect(() => {
+    const revealNodes = Array.from(document.querySelectorAll('.landing-motion .scroll-reveal, .landing-motion .scroll-reveal-left, .landing-motion .scroll-reveal-right, .landing-motion .scroll-pop'))
+    if (!revealNodes.length) return undefined
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible')
+        } else {
+          entry.target.classList.remove('is-visible')
+        }
+      })
+    }, { threshold: 0.18, rootMargin: '-6% 0px -6% 0px' })
+    revealNodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <div
-      className="neon-rainbow-bg relative min-h-screen overflow-x-hidden text-ink"
+      className="landing-motion motion-page neon-rainbow-bg relative min-h-screen overflow-x-hidden text-ink"
       style={{
         '--color-bg': '5 7 15',
         '--color-panel': '9 17 32',
@@ -200,7 +216,7 @@ export default function LandingPage() {
               ['HITL', 'Clarify, install, approve, resume'],
               ['Evidence', 'Reports, citations, traces, A2A'],
             ].map(([value, label]) => (
-              <div key={value} className="scroll-reveal border-l border-cyan-300/25 px-4 py-2">
+              <div key={value} className={`${label.length % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} border-l border-cyan-300/25 px-4 py-2`}>
                 <div className="font-display text-3xl text-white">{value}</div>
                 <div className="mt-1 text-sm text-slate-300">{label}</div>
               </div>
@@ -241,7 +257,7 @@ export default function LandingPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {CAPABILITIES.map((item, index) => (
-                <div key={item} className="scroll-reveal border border-white/10 bg-white/[0.04] px-4 py-4 text-sm leading-6 text-slate-200 backdrop-blur" style={{ animationDelay: `${index * 70}ms` }}>
+                <div key={item} className={`${index % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} border border-white/10 bg-white/[0.04] px-4 py-4 text-sm leading-6 text-slate-200 backdrop-blur`} style={{ animationDelay: `${index * 70}ms` }}>
                   <CheckCircle2 size={15} className="mb-3 text-emerald-300" />
                   {item}
                 </div>
@@ -259,7 +275,7 @@ export default function LandingPage() {
             />
             <div className="mt-10 grid gap-3 md:grid-cols-3">
               {USE_CASES.map((item, index) => (
-                <div key={item} className="scroll-reveal flex items-center gap-3 border border-white/10 bg-black/20 px-4 py-4 text-slate-200" style={{ animationDelay: `${index * 60}ms` }}>
+                <div key={item} className={`${index % 2 === 0 ? 'scroll-reveal-left' : 'scroll-reveal-right'} flex items-center gap-3 border border-white/10 bg-black/20 px-4 py-4 text-slate-200`} style={{ animationDelay: `${index * 60}ms` }}>
                   <GitBranch size={16} className="text-fuchsia-200" />
                   {item}
                 </div>
@@ -269,7 +285,7 @@ export default function LandingPage() {
         </section>
 
         <section className="px-6 py-20">
-          <div className="scroll-reveal mx-auto max-w-5xl border border-cyan-300/25 bg-cyan-300/10 px-8 py-10 text-center backdrop-blur-xl">
+          <div className="scroll-reveal-left mx-auto max-w-5xl border border-cyan-300/25 bg-cyan-300/10 px-8 py-10 text-center backdrop-blur-xl">
             <div className="mb-4 inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-cyan-100">
               <Bot size={13} />
               Ready for build mode

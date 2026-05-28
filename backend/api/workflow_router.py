@@ -158,8 +158,13 @@ async def _attach_run_timing(db, run: dict) -> dict:
 async def _accessible_project_ids(db, user_id: str | None, role: str | None) -> list[str]:
     if not user_id or role == "admin":
         return []
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "email": 1})
+    email = (user or {}).get("email", "").strip().lower()
+    project_terms = [{"owner_user_id": user_id}, {"member_ids": user_id}]
+    if email:
+        project_terms.append({"member_emails": email})
     projects = await db.projects.find(
-        {"$or": [{"owner_user_id": user_id}, {"member_ids": user_id}]},
+        {"$or": project_terms},
         {"_id": 0, "project_id": 1},
     ).to_list(500)
     return [p["project_id"] for p in projects]
