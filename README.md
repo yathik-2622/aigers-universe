@@ -4,6 +4,31 @@ AIger's Universe is an enterprise multi-agent workflow platform for designing, r
 
 The platform is built for teams that need more than a chat screen. A prompt can become a clarified use case, a source-backed market view, a technical design document, a workflow canvas, a set of framework-native agents, governed approval gates, live execution traces, and a final report with direct evidence.
 
+
+
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18-20232A?logo=react&logoColor=61DAFB)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-Frontend-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Database-13AA52?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Mongo Vectors](https://img.shields.io/badge/Mongo-Vector_Search-13AA52)](https://www.mongodb.com/)
+[![LangChain](https://img.shields.io/badge/LangChain-Agent_Framework-121212)](https://www.langchain.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B35)](https://www.langchain.com/langgraph)
+[![CrewAI](https://img.shields.io/badge/CrewAI-Multi_Agent-6E56CF)](https://www.crewai.com/)
+[![Agno](https://img.shields.io/badge/Agno-Agent_Runtime-111827)](https://github.com/agno-agi/agno)
+[![MCP](https://img.shields.io/badge/MCP-Protocol-black)](https://modelcontextprotocol.io/)
+[![FastMCP](https://img.shields.io/badge/FastMCP-MCP_Server-1E293B)](https://github.com/jlowin/fastmcp)
+[![A2A](https://img.shields.io/badge/A2A-Agent_to_Agent-2563EB)](https://github.com/google/A2A)
+[![ReactFlow](https://img.shields.io/badge/ReactFlow-Workflow_Canvas-FF0072)](https://reactflow.dev/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-Styling-0F172A?logo=tailwindcss)](https://tailwindcss.com/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-Gateway-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
+[![HITL](https://img.shields.io/badge/HITL-Human_in_the_Loop-F97316)](#)
+[![Observability](https://img.shields.io/badge/Observability-Agent_Tracing-14B8A6)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+
+
+
 ## Table of contents
 
 - [Platform position](#platform-position)
@@ -233,10 +258,3 @@ Use this checklist after major changes:
 - Use direct source links where possible instead of anonymous excerpts.
 - Avoid duplicate output sections in final reports.
 - Treat documentation as part of the product surface, not as a stale afterthought.
-
-## Documentation references used for this README pass
-
-- GitHub and Google README guidance emphasize that top-level READMEs should orient readers quickly and point to usage, status, and deeper docs.
-- ReadMe documentation guidance emphasizes navigable documentation architecture for developer journeys.
-- Awesome README examples emphasize clear value, setup, usage, architecture, and contribution sections.
-- The BLACKBOX reference page influenced the landing and documentation visual direction: large first-viewport identity, animated/code-like execution surfaces, and agent-focused capability framing.
