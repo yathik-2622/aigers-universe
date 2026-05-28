@@ -1216,6 +1216,14 @@ async def list_workflows(request: Request, project_id: str | None = None):
     db = get_db()
     query = await _workflow_query(db, request, {"project_id": project_id} if project_id else {})
     workflows = await db.workflow_definitions.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    owner_ids = sorted({workflow.get("owner_user_id") for workflow in workflows if workflow.get("owner_user_id")})
+    if owner_ids:
+        users = await db.users.find({"user_id": {"$in": owner_ids}}, {"_id": 0, "user_id": 1, "display_name": 1, "email": 1}).to_list(500)
+        user_lookup = {user["user_id"]: user for user in users}
+        for workflow in workflows:
+            owner = user_lookup.get(workflow.get("owner_user_id")) or {}
+            workflow["owner_name"] = owner.get("display_name") or ""
+            workflow["owner_email"] = owner.get("email") or ""
     return {"workflows": workflows, "count": len(workflows)}
 
 
@@ -1232,13 +1240,17 @@ async def get_workflow(workflow_id: str, request: Request):
 @router.delete("/{workflow_id}")
 async def delete_workflow(workflow_id: str, request: Request):
     db = get_db()
-    wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0, "workflow_id": 1, "owner_user_id": 1})
+    wf = await db.workflow_definitions.find_one({"workflow_id": workflow_id}, {"_id": 0, "workflow_id": 1, "owner_user_id": 1, "project_id": 1})
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
     role = get_optional_role(request)
     user_id = get_optional_user_id(request)
-    if role != "admin" and wf.get("owner_user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the workflow owner or an admin can delete this workflow")
+    can_delete = role == "admin" or wf.get("owner_user_id") == user_id
+    if not can_delete and wf.get("project_id"):
+        project = await db.projects.find_one({"project_id": wf.get("project_id")}, {"_id": 0, "owner_user_id": 1})
+        can_delete = bool(project and project.get("owner_user_id") == user_id)
+    if not can_delete:
+        raise HTTPException(status_code=403, detail="Only the workflow owner, project owner, or an admin can delete this workflow")
     await db.workflow_definitions.delete_one({"workflow_id": workflow_id})
     return {"success": True, "workflow_id": workflow_id}
 

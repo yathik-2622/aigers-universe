@@ -1,18 +1,35 @@
 import React, { useEffect, useState } from 'react'
-import { Briefcase, Check, PencilLine, Plus, Trash2, Users } from 'lucide-react'
+import { Briefcase, Calendar, Check, Copy, PencilLine, Plus, Trash2, User, Users, Workflow } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import ConfirmDialog from '../components/common/ConfirmDialog.jsx'
 import { createProject, deleteProject, listProjects, updateProject } from '../api/projects.js'
+import { deleteWorkflow, getWorkflow, listAllRuns, listWorkflows } from '../api/workflows.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { getCurrentProjectId, setCurrentProjectId } from '../lib/projectStorage.js'
 
+const BUILDER_DRAFT_KEY = 'aigers.workflowBuilder.draft.v2'
+
+function formatDate(value) {
+  if (!value) return 'Unknown date'
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return String(value)
+  }
+}
+
 export default function ProjectsPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [projects, setProjects] = useState([])
+  const [workflows, setWorkflows] = useState([])
+  const [runs, setRuns] = useState([])
   const [currentProjectId, setCurrent] = useState(getCurrentProjectId())
   const [form, setForm] = useState({ name: '', description: '', member_emails: '' })
   const [editingId, setEditingId] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [workflowDeleteTarget, setWorkflowDeleteTarget] = useState(null)
 
   const load = async () => {
     try {
@@ -28,6 +45,23 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  const loadProjectWorkflows = async (projectId = currentProjectId) => {
+    if (!projectId) {
+      setWorkflows([])
+      setRuns([])
+      return
+    }
+    try {
+      const [workflowData, runData] = await Promise.all([listWorkflows(projectId), listAllRuns()])
+      setWorkflows(workflowData.workflows || [])
+      setRuns((runData.runs || []).filter((run) => run.project_id === projectId || (workflowData.workflows || []).some((workflow) => workflow.workflow_id === run.workflow_id)))
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to load project workflows')
+    }
+  }
+
+  useEffect(() => { loadProjectWorkflows(currentProjectId) }, [currentProjectId])
 
   const submit = async () => {
     if (!form.name.trim()) return toast.error('Project name required')
@@ -74,6 +108,77 @@ export default function ProjectsPage() {
       toast.error(err?.response?.data?.detail || 'Project delete failed')
     }
   }
+
+  const removeWorkflow = async () => {
+    if (!workflowDeleteTarget) return
+    try {
+      await deleteWorkflow(workflowDeleteTarget.workflow_id)
+      toast.success('Workflow deleted')
+      setWorkflowDeleteTarget(null)
+      loadProjectWorkflows()
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Workflow delete failed')
+    }
+  }
+
+  const copyWorkflowToBuilder = async (workflow) => {
+    try {
+      const fullWorkflow = await getWorkflow(workflow.workflow_id)
+      const workflowRuns = runs.filter((run) => run.workflow_id === workflow.workflow_id)
+      const draft = {
+        nodes: fullWorkflow.canvas?.nodes || [],
+        edges: fullWorkflow.canvas?.edges || [],
+        name: `${fullWorkflow.name || 'Copied workflow'} copy`,
+        workflowInput: fullWorkflow.description || '',
+        autoPrompt: fullWorkflow.description || '',
+        projectId: currentProjectId || fullWorkflow.project_id || '',
+        selectedKbDocIds: [],
+        selectedDocId: null,
+        workflowInputDocs: [],
+        workflowRepoUrl: '',
+        workflowRepoImport: null,
+        kbMode: 'knowledge_base',
+        docCategory: 'general',
+        repoUrl: '',
+        copiedWorkflowContext: {
+          source_workflow_id: fullWorkflow.workflow_id,
+          source_name: fullWorkflow.name,
+          source_created_at: fullWorkflow.created_at,
+          source_owner_user_id: fullWorkflow.owner_user_id,
+          agents: fullWorkflow.agents || [],
+          input_bindings: (fullWorkflow.canvas?.nodes || []).map((node) => ({
+            agent: node.data?.name || node.data?.label || node.id,
+            tools: node.data?.tools || [],
+            input_bindings: node.data?.input_bindings || node.data?.inputBindings || {},
+          })),
+          runs: workflowRuns.slice(0, 8).map((run) => ({
+            run_id: run.run_id,
+            status: run.status,
+            started_at: run.started_at,
+            prompt: run.input_data?.user_prompt || run.input_data?.workflow_inputs?.text || '',
+            uploaded_files: run.input_data?.workflow_inputs?.upload_document_ids || [],
+            repo_url: run.input_data?.workflow_inputs?.repo_url || run.input_data?.repo_url || '',
+            kb_document_ids: run.input_data?.workflow_inputs?.kb_document_ids || run.input_data?.kb_document_ids || [],
+          })),
+        },
+        orchestratorStream: [{
+          id: `copied-${Date.now()}`,
+          tone: 'ok',
+          label: 'Copied workflow',
+          text: `Loaded ${fullWorkflow.name || 'workflow'} from ${currentProject?.name || 'project'} with ${workflowRuns.length} previous run(s).`,
+        }],
+        saved_at: new Date().toISOString(),
+      }
+      localStorage.setItem(`${BUILDER_DRAFT_KEY}:new`, JSON.stringify(draft))
+      localStorage.setItem(BUILDER_DRAFT_KEY, JSON.stringify(draft))
+      toast.success('Workflow copied into builder draft')
+      navigate('/builder')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to copy workflow')
+    }
+  }
+
+  const currentProject = projects.find((project) => project.project_id === currentProjectId)
 
   return (
     <div className="p-8 max-w-[1450px]">
@@ -135,6 +240,68 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      <div className="mt-5 rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-muted">Project tagged workflows</div>
+            <div className="mt-1 font-display text-xl">{currentProject?.name || 'Select a project'}</div>
+          </div>
+          <div className="text-[12px] text-muted">{workflows.length} workflow(s)</div>
+        </div>
+        <div className="space-y-3">
+          {workflows.map((workflow) => {
+            const projectOwnerCanDelete = currentProject?.owner_user_id === user?.user_id
+            const workflowOwnerCanDelete = workflow.owner_user_id === user?.user_id
+            const canDeleteWorkflow = user?.role === 'admin' || projectOwnerCanDelete || workflowOwnerCanDelete
+            const workflowRuns = runs.filter((run) => run.workflow_id === workflow.workflow_id)
+            const lastRun = workflowRuns[0]
+            return (
+              <div key={workflow.workflow_id} className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Workflow size={15} className="text-accent" />
+                      <div className="truncate font-medium">{workflow.name}</div>
+                    </div>
+                    <div className="mt-1 line-clamp-2 text-[12px] text-muted">{workflow.description || 'No workflow prompt saved.'}</div>
+                    <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted">
+                      <span className="inline-flex items-center gap-1.5"><User size={12} /> Created by {workflow.owner_name || workflow.owner_email || workflow.owner_user_id || 'unknown'}</span>
+                      <span className="inline-flex items-center gap-1.5"><Calendar size={12} /> {formatDate(workflow.created_at)}</span>
+                      <span>{workflow.agents?.length || 0} agents</span>
+                      <span>{workflowRuns.length} runs</span>
+                      {lastRun && <span>Last run: {lastRun.status} at {formatDate(lastRun.started_at)}</span>}
+                    </div>
+                    {lastRun?.input_data && (
+                      <details className="mt-3 rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
+                        <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Previous run inputs</summary>
+                        <div className="mt-2 grid gap-2 text-[12px] text-muted md:grid-cols-2">
+                          <div>Prompt: {lastRun.input_data?.user_prompt || lastRun.input_data?.workflow_inputs?.text || 'No prompt captured'}</div>
+                          <div>Uploaded files: {(lastRun.input_data?.workflow_inputs?.upload_document_ids || []).length}</div>
+                          <div>KB docs: {(lastRun.input_data?.workflow_inputs?.kb_document_ids || lastRun.input_data?.kb_document_ids || []).length}</div>
+                          <div>Repo: {lastRun.input_data?.workflow_inputs?.repo_url || lastRun.input_data?.repo_url || 'None'}</div>
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => copyWorkflowToBuilder(workflow)} className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs text-accent hover:bg-accent/15">
+                      <Copy size={12} /> Copy to builder
+                    </button>
+                    {canDeleteWorkflow && (
+                      <button onClick={() => setWorkflowDeleteTarget(workflow)} className="inline-flex items-center justify-center rounded-full border border-[#ef476f]/30 bg-[#ef476f]/10 p-2 text-[#ef476f] hover:bg-[#ef476f]/15">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          {currentProjectId && workflows.length === 0 && <div className="py-10 text-center text-sm text-muted">No workflows are tagged to this project yet.</div>}
+          {!currentProjectId && <div className="py-10 text-center text-sm text-muted">Select a project to see tagged workflows.</div>}
+        </div>
+      </div>
+
       <ConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -142,6 +309,14 @@ export default function ProjectsPage() {
         title={`Delete ${deleteTarget?.name || 'project'}?`}
         description="Workflows and runs will be detached from this project, but their historical records will remain."
         confirmLabel="Delete project"
+      />
+      <ConfirmDialog
+        open={!!workflowDeleteTarget}
+        onClose={() => setWorkflowDeleteTarget(null)}
+        onConfirm={removeWorkflow}
+        title={`Delete ${workflowDeleteTarget?.name || 'workflow'}?`}
+        description="This removes the workflow definition. Existing run records remain available in run history where permitted."
+        confirmLabel="Delete workflow"
       />
     </div>
   )

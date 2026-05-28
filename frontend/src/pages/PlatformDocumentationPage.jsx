@@ -495,6 +495,21 @@ export default function PlatformDocumentationPage() {
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [])
 
+  useEffect(() => {
+    const revealNodes = Array.from(document.querySelectorAll('.platform-docs .scroll-reveal, .platform-docs .scroll-reveal-left, .platform-docs .scroll-reveal-right, .platform-docs .scroll-pop'))
+    if (!revealNodes.length) return undefined
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible')
+          observer.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' })
+    revealNodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [filteredSections.length])
+
   const filteredSections = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     return DOC_SECTIONS.filter((section) => {
@@ -516,7 +531,7 @@ export default function PlatformDocumentationPage() {
   }, [query, selected])
 
   return (
-    <div className="neon-rainbow-bg relative min-h-screen overflow-x-hidden text-white">
+    <div className="platform-docs neon-rainbow-bg relative min-h-screen overflow-x-hidden text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(2,8,20,0.28)_52%,rgba(2,8,20,0.84)_100%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-50" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px)', backgroundSize: '24px 24px' }} />
       <div className="pointer-events-none absolute left-[-120px] top-24 h-72 w-72 rounded-full border border-cyan-300/10 bg-cyan-300/8 blur-3xl animate-float-soft" />
@@ -531,7 +546,7 @@ export default function PlatformDocumentationPage() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-2 border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.24em] text-cyan-100/80">
               <Compass size={12} />
-              AIger engineering atlas
+              <span className="doc-type-line">AIger engineering atlas</span>
             </span>
             <span className="inline-flex items-center gap-2 border border-fuchsia-300/18 bg-fuchsia-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/75">
               Cyberpunk 3D documentation surface

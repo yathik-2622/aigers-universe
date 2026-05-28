@@ -1,6 +1,6 @@
 import { api } from './client'
 
-export const listWorkflows = () => api.get('/workflows').then(r => r.data)
+export const listWorkflows = (projectId = '') => api.get('/workflows', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data)
 export const getWorkflow = (id) => api.get(`/workflows/${id}`).then(r => r.data)
 export const createWorkflow = (body) => api.post('/workflows', body).then(r => r.data)
 export const updateWorkflow = (id, body) => api.put(`/workflows/${id}`, body).then(r => r.data)
@@ -63,3 +63,4 @@ export const resumeRun = (runId) => api.post(`/workflows/runs/${runId}/resume`).
 export const stopRun = (runId) => api.post(`/workflows/runs/${runId}/stop`).then(r => r.data)
 export const listAllRuns = () => api.get('/workflows/runs/all').then(r => r.data)
 export const deleteRun = (runId) => api.delete(`/workflows/runs/${runId}`).then(r => r.data)
+export const deleteWorkflow = (workflowId) => api.delete(`/workflows/${workflowId}`).then(r => r.data)

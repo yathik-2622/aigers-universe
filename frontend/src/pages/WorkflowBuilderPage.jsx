@@ -44,6 +44,7 @@ export default function WorkflowBuilderPage() {
   const [workflowInputDocs, setWorkflowInputDocs] = useState([])
   const [workflowRepoUrl, setWorkflowRepoUrl] = useState('')
   const [workflowRepoImport, setWorkflowRepoImport] = useState(null)
+  const [copiedWorkflowContext, setCopiedWorkflowContext] = useState(null)
   const [docCategory, setDocCategory] = useState('general')
   const [kbMode, setKbMode] = useState('upload')
   const [repoUrl, setRepoUrl] = useState('')
@@ -93,6 +94,7 @@ export default function WorkflowBuilderPage() {
     setWorkflowInputDocs(draft.workflowInputDocs || [])
     setWorkflowRepoUrl(draft.workflowRepoUrl || '')
     setWorkflowRepoImport(draft.workflowRepoImport || null)
+    setCopiedWorkflowContext(draft.copiedWorkflowContext || null)
     setKbMode(draft.kbMode || 'upload')
     setDocCategory(draft.docCategory || 'general')
     setRepoUrl(draft.repoUrl || '')
@@ -130,6 +132,7 @@ export default function WorkflowBuilderPage() {
       workflowInputDocs,
       workflowRepoUrl,
       workflowRepoImport,
+      copiedWorkflowContext,
       kbMode,
       docCategory,
       repoUrl,
@@ -137,7 +140,7 @@ export default function WorkflowBuilderPage() {
       saved_at: new Date().toISOString(),
     }
     try { localStorage.setItem(builderDraftKey(savedId || workflowId), JSON.stringify(draft)) } catch {}
-  }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, workflowRepoUrl, workflowRepoImport, kbMode, docCategory, repoUrl, orchestratorStream])
+  }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, workflowRepoUrl, workflowRepoImport, copiedWorkflowContext, kbMode, docCategory, repoUrl, orchestratorStream])
 
   useEffect(() => {
     if (!orchestratorLogRef.current) return
@@ -606,6 +609,46 @@ export default function WorkflowBuilderPage() {
         </div>
 
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Drag agents to canvas</div>
+        {copiedWorkflowContext && (
+          <div className="mb-5 rounded-2xl border border-accent/25 bg-accent/10 p-4">
+            <div className="text-[11px] uppercase tracking-widest text-accent">Copied workflow context</div>
+            <div className="mt-2 text-sm font-medium text-ink">{copiedWorkflowContext.source_name || 'Copied workflow'}</div>
+            <div className="mt-1 text-[11px] text-muted">Source: {copiedWorkflowContext.source_workflow_id}</div>
+            <div className="mt-3 grid gap-2 text-[12px] text-muted">
+              <div>{(copiedWorkflowContext.agents || []).length} source agent(s)</div>
+              <div>{(copiedWorkflowContext.runs || []).length} previous run(s) carried as metadata</div>
+            </div>
+            {(copiedWorkflowContext.input_bindings || []).length > 0 && (
+              <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Tools and input bindings</summary>
+                <div className="mt-2 space-y-2">
+                  {(copiedWorkflowContext.input_bindings || []).slice(0, 6).map((item, index) => (
+                    <div key={`${item.agent}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+                      <div className="text-[12px] text-ink">{item.agent}</div>
+                      <div className="mt-1 text-[11px] text-muted">Tools: {(item.tools || []).join(', ') || 'None recorded'}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {(copiedWorkflowContext.runs || []).length > 0 && (
+              <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Previous runs and inputs</summary>
+                <div className="mt-2 space-y-2">
+                  {(copiedWorkflowContext.runs || []).slice(0, 5).map((run) => (
+                    <div key={run.run_id} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] text-muted">
+                      <div className="font-mono text-accent">{run.run_id}</div>
+                      <div>Status: {run.status}</div>
+                      <div className="line-clamp-2">Prompt: {run.prompt || 'No prompt captured'}</div>
+                      <div>Uploaded files: {(run.uploaded_files || []).length} | KB docs: {(run.kb_document_ids || []).length}</div>
+                      {run.repo_url && <div className="truncate">Repo: {run.repo_url}</div>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
         <div className="space-y-2 mb-6">
           {agents.length === 0 && (
             <div className="text-sm text-muted py-6 text-center border border-dashed border-line rounded-lg">
@@ -782,7 +825,7 @@ export default function WorkflowBuilderPage() {
           <WorkflowCanvas initialNodes={nodes} initialEdges={edges} activeNodeId={focusedNodeId} onChange={(n, e) => { setNodes(n); setEdges(e) }} />
         </ReactFlowProvider>
         {showOrchestratorPanel && (orchestratorStream.length > 0 || constructingCanvas || autoBuilding || installingMissing) && (
-          <div className="absolute right-4 top-16 z-20 w-[min(620px,calc(100%-2rem))]">
+          <div className="absolute right-4 top-16 z-20 w-[min(780px,calc(100%-2rem))]">
             <div className="overflow-hidden rounded-2xl border border-cyan-300/20 bg-[#05070b]/80 shadow-[0_24px_90px_rgba(0,0,0,0.3)] backdrop-blur-xl">
               <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
                 <div className="min-w-0">
@@ -791,14 +834,21 @@ export default function WorkflowBuilderPage() {
                 </div>
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{orchestratorStream.length}</span>
               </div>
-              <div ref={orchestratorLogRef} className="max-h-[240px] overflow-y-auto px-4 py-3 font-mono">
+              <div ref={orchestratorLogRef} className="max-h-[165px] overflow-y-auto px-4 py-3 font-mono">
                 {orchestratorStream.length === 0 && <div className="text-[12px] text-white/40">Waiting for orchestration activity...</div>}
                 <div className="space-y-2.5">
                   {orchestratorStream.map((line, index) => (
-                    <div key={line.id} className="text-[12px] leading-5">
+                    <div key={line.id} className={`text-[12px] leading-5 ${index === orchestratorStream.length - 1 && isPlannerBusy ? 'animate-[fadeUp_0.35s_ease]' : ''}`}>
                       <span className="mr-2 text-white/25">{String(index + 1).padStart(2, '0')}</span>
                       <span className={`mr-2 font-semibold ${logToneClass(line.tone)}`}>{line.label || 'Thinking'}</span>
                       <span className="text-white/58">{line.text}</span>
+                      {index === orchestratorStream.length - 1 && isPlannerBusy && (
+                        <span className="ml-2 inline-flex w-8 items-center gap-0.5 align-middle text-cyan-200">
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200 [animation-delay:120ms]" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200 [animation-delay:240ms]" />
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
