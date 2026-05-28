@@ -98,12 +98,13 @@ def _context_excerpt(text: str, limit: int = 24000) -> str:
 async def _hydrate_workflow_inputs(input_data: dict) -> dict:
     workflow_inputs = dict((input_data or {}).get("workflow_inputs") or {})
     upload_ids = workflow_inputs.get("upload_document_ids") or []
+    kb_ids = workflow_inputs.get("kb_document_ids") or []
     repo_document_id = workflow_inputs.get("repo_document_id")
-    if not upload_ids and not repo_document_id:
+    if not upload_ids and not kb_ids and not repo_document_id:
         return input_data
 
     db = get_db()
-    all_ids = list(dict.fromkeys([*upload_ids, *([repo_document_id] if repo_document_id else [])]))
+    all_ids = list(dict.fromkeys([*upload_ids, *kb_ids, *([repo_document_id] if repo_document_id else [])]))
     docs = await db[AIGERS_DOCUMENTS].find(
         {"document_id": {"$in": all_ids}},
         {"_id": 0, "document_id": 1, "filename": 1, "main_category": 1, "sub_category": 1, "text": 1, "context_excerpt": 1, "text_length": 1, "source_meta": 1, "scope": 1},
@@ -132,6 +133,18 @@ async def _hydrate_workflow_inputs(input_data: dict) -> dict:
             "text_length": repo_doc.get("text_length", 0),
             "text_excerpt": repo_doc.get("context_excerpt") or _context_excerpt(repo_doc.get("text", ""), limit=18000),
         }
+    workflow_inputs["knowledge_base_documents"] = [
+        {
+            "document_id": doc_id,
+            "filename": docs_by_id[doc_id].get("filename", ""),
+            "category": docs_by_id[doc_id].get("main_category", ""),
+            "sub_category": docs_by_id[doc_id].get("sub_category", ""),
+            "text_length": docs_by_id[doc_id].get("text_length", 0),
+            "text_excerpt": docs_by_id[doc_id].get("context_excerpt") or _context_excerpt(docs_by_id[doc_id].get("text", ""), limit=12000),
+        }
+        for doc_id in kb_ids
+        if doc_id in docs_by_id
+    ]
 
     return {**(input_data or {}), "workflow_inputs": workflow_inputs}
 

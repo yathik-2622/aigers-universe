@@ -140,7 +140,7 @@ export default function MarketplacePage() {
         )}
       >
         <div className="p-5">
-          <CodeSnippet code={preview.code} />
+          <CodeSnippet code={preview.code} language={preview.framework === 'langflow' ? 'json' : 'python'} />
         </div>
       </ModalShell>
     </div>

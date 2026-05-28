@@ -8,17 +8,60 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
 }
 
-function parseInline(text) {
-  return escapeHtml(text)
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function htmlToReadableMarkdown(value) {
+  const text = String(value || '')
+  if (!/<[a-z][\s\S]*>/i.test(text)) return text
+  return text
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<\/h1>/gi, '\n')
+    .replace(/<h1[^>]*>/gi, '# ')
+    .replace(/<\/h2>/gi, '\n')
+    .replace(/<h2[^>]*>/gi, '## ')
+    .replace(/<\/h3>/gi, '\n')
+    .replace(/<h3[^>]*>/gi, '### ')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function parseInline(text, highlight = '') {
+  let html = escapeHtml(text)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="text-accent hover:underline">$1</a>')
     .replace(/`([^`]+)`/g, '<code class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.92em]">$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/(^|\s)#{1,6}\s*/g, '$1')
+    .replace(/\*\*/g, '')
+  const clipped = escapeHtml(String(highlight || '').trim()).slice(0, 220)
+  if (clipped.length > 24) {
+    html = html.replace(new RegExp(escapeRegExp(clipped), 'gi'), '<mark class="rounded bg-amber-300/25 px-1 text-amber-50">$&</mark>')
+  }
+  return html
 }
 
 function normalizeContent(markdown) {
-  const raw = typeof markdown === 'string' ? markdown : JSON.stringify(markdown, null, 2)
-  if (!raw.includes('\n') && raw.includes('\\n')) return raw.replace(/\\n/g, '\n')
-  return raw.replace(/\/\/n/g, '\n')
+  const raw = typeof markdown === 'string'
+    ? markdown
+    : (markdown?.markdown || markdown?.content || markdown?.text || JSON.stringify(markdown, null, 2))
+  return htmlToReadableMarkdown(String(raw || ''))
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n\\n/g, '\n\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\/\/n/g, '\n')
 }
 
 function looksLikeJson(text) {
@@ -129,6 +172,13 @@ function ErDiagramView({ source }) {
 }
 
 function TableBlock({ table }) {
+  const rowTone = (row) => {
+    const text = row.join(' ').toLowerCase()
+    if (/\b(high|red|fail|reject|critical|blocker)\b/.test(text)) return 'border-rose-300/18 bg-rose-400/[0.055]'
+    if (/\b(low|green|pass|approve|ok|success)\b/.test(text)) return 'border-emerald-300/18 bg-emerald-400/[0.045]'
+    if (/\b(medium|review|warning|amber)\b/.test(text)) return 'border-amber-300/18 bg-amber-300/[0.045]'
+    return 'border-white/5'
+  }
   return (
     <div className="overflow-x-auto rounded-[24px] border border-white/10 bg-white/[0.03]">
       <table className="min-w-full border-collapse text-sm">
@@ -141,9 +191,9 @@ function TableBlock({ table }) {
         </thead>
         <tbody>
           {table.rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-t border-white/5 text-[#ced8eb]">
+            <tr key={rowIndex} className={`border-t text-[#ced8eb] ${rowTone(row)}`}>
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="px-4 py-3 align-top">{cell}</td>
+                <td key={cellIndex} className="px-4 py-3 align-top" dangerouslySetInnerHTML={{ __html: parseInline(cell) }} />
               ))}
             </tr>
           ))}
@@ -242,7 +292,7 @@ function parseBlocks(content) {
   return blocks
 }
 
-export default function MarkdownReport({ markdown }) {
+export default function MarkdownReport({ markdown, highlight = '' }) {
   const normalized = normalizeContent(markdown)
   const prettyJson = looksLikeJson(normalized) ? tryPrettyJson(normalized) : ''
 
@@ -256,29 +306,29 @@ export default function MarkdownReport({ markdown }) {
     <div className="space-y-4 text-[14px] leading-7 text-ink">
       {blocks.map((block, idx) => {
         if (block.type === 'space') return <div key={idx} className="h-1" />
-        if (block.type === 'h1') return <h1 key={idx} className="font-display text-3xl tracking-tight text-ink" dangerouslySetInnerHTML={{ __html: parseInline(block.text) }} />
-        if (block.type === 'h2') return <h2 key={idx} className="font-display pt-2 text-xl tracking-tight text-accent2" dangerouslySetInnerHTML={{ __html: parseInline(block.text) }} />
-        if (block.type === 'h3') return <h3 key={idx} className="pt-1 text-base font-semibold text-[#ffd580]" dangerouslySetInnerHTML={{ __html: parseInline(block.text) }} />
+        if (block.type === 'h1') return <h1 key={idx} className="font-display text-3xl tracking-tight text-ink" dangerouslySetInnerHTML={{ __html: parseInline(block.text, highlight) }} />
+        if (block.type === 'h2') return <h2 key={idx} className="font-display pt-2 text-xl tracking-tight text-accent2" dangerouslySetInnerHTML={{ __html: parseInline(block.text, highlight) }} />
+        if (block.type === 'h3') return <h3 key={idx} className="pt-1 text-base font-semibold text-[#ffd580]" dangerouslySetInnerHTML={{ __html: parseInline(block.text, highlight) }} />
         if (block.type === 'code') return <CodeSnippet key={idx} code={block.text} language={block.language} />
         if (block.type === 'er') return <ErDiagramView key={idx} source={block.text} />
         if (block.type === 'table') return <TableBlock key={idx} table={block.table} />
         if (block.type === 'ul') {
           return (
             <ul key={idx} className="list-disc space-y-2 pl-5 text-[#ccd6ea]">
-              {block.items.map((item, itemIdx) => <li key={itemIdx} dangerouslySetInnerHTML={{ __html: parseInline(item) }} />)}
+              {block.items.map((item, itemIdx) => <li key={itemIdx} dangerouslySetInnerHTML={{ __html: parseInline(item, highlight) }} />)}
             </ul>
           )
         }
         if (block.type === 'ol') {
           return (
             <ol key={idx} className="list-decimal space-y-2 pl-5 text-[#ccd6ea]">
-              {block.items.map((item, itemIdx) => <li key={itemIdx} dangerouslySetInnerHTML={{ __html: parseInline(item) }} />)}
+              {block.items.map((item, itemIdx) => <li key={itemIdx} dangerouslySetInnerHTML={{ __html: parseInline(item, highlight) }} />)}
             </ol>
           )
         }
         return (
           <Fragment key={idx}>
-            <p className="whitespace-pre-wrap text-[#c5cee0]" dangerouslySetInnerHTML={{ __html: parseInline(block.text) }} />
+            <p className="whitespace-pre-wrap text-[#c5cee0]" dangerouslySetInnerHTML={{ __html: parseInline(block.text, highlight) }} />
           </Fragment>
         )
       })}

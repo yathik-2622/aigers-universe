@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ReactFlowProvider } from 'reactflow'
 import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Copy, FileText, LoaderCircle, MessageSquare, PauseCircle, Radio, RefreshCcw, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
+import CodeSnippet from '../components/common/CodeSnippet.jsx'
+import ActivityConsole from '../components/common/ActivityConsole.jsx'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
 import { fetchCitationSource } from '../api/toolChat.js'
@@ -28,6 +30,7 @@ export default function WorkflowRunPage() {
   const [expandedMessageId, setExpandedMessageId] = useState('')
   const [focusedNodeId, setFocusedNodeId] = useState('')
   const [latestA2AMessageId, setLatestA2AMessageId] = useState('')
+  const [runStatusEvents, setRunStatusEvents] = useState([])
   const a2aScrollRef = React.useRef(null)
   const prevA2ACountRef = React.useRef(0)
 
@@ -127,6 +130,13 @@ export default function WorkflowRunPage() {
         if (cancelled) return
         try {
           applyRunState(JSON.parse(ev.data))
+        } catch {}
+      })
+      es.addEventListener('status_update', (ev) => {
+        if (cancelled) return
+        try {
+          const event = JSON.parse(ev.data)
+          setRunStatusEvents((current) => [...current.slice(-24), event])
         } catch {}
       })
       es.addEventListener('a2a_message', (ev) => {
@@ -256,7 +266,7 @@ export default function WorkflowRunPage() {
     id: `e_${i}`,
     source: n.id,
     target: `step_${i + 1}`,
-    animated: ['running', 'resuming'].includes(run?.status) && run?.current_step === i + 1,
+    animated: ['completed', 'running', 'resuming'].includes(run?.status) ? i <= Math.max(0, Number(run?.current_step ?? nodes.length)) : false,
   }))
 
   useEffect(() => {
@@ -337,6 +347,34 @@ export default function WorkflowRunPage() {
   const resumeLabel = run?.status === 'stopped' ? 'Start' : 'Resume'
   const timing = run?.timing || {}
   const activeEstimate = timing.agent_estimates?.find((item) => item.step_number === run?.current_step)
+  const executionLogs = useMemo(() => {
+    const logs = []
+    if (run?.status) {
+      logs.push({
+        id: `run-${run.run_id || runId}-${run.status}`,
+        tone: run.status === 'failed' ? 'bad' : run.status === 'completed' ? 'ok' : run.status === 'paused' ? 'warn' : 'live',
+        label: `Run ${run.status}`,
+        detail: run.failure_reason || `Workflow is ${run.status}${run.current_step ? ` at step ${run.current_step}` : ''}.`,
+        timestamp: run.updated_at || run.started_at,
+      })
+    }
+    if (control.pause_requested) logs.push({ id: 'pause-requested', tone: 'warn', label: 'Pause queued', detail: 'The run will pause at the next safe checkpoint.' })
+    if (control.stop_requested) logs.push({ id: 'stop-requested', tone: 'bad', label: 'Stop queued', detail: 'The run will stop at the next safe checkpoint.' })
+    ;(runStatusEvents || []).slice(-8).forEach((event, index) => {
+      logs.push({ id: event.id || `status-${index}-${event.timestamp || ''}`, ...event })
+    })
+    ;(run?.a2a_messages || []).slice(-8).forEach((message) => {
+      logs.push({
+        id: message.message_id,
+        tone: message.message_type === 'error' ? 'bad' : 'tool',
+        label: `${message.from_agent || 'Agent'} → ${message.to_agent || 'Agent'}`,
+        detail: message.message_type || 'A2A message',
+        payload: message.payload,
+        timestamp: message.timestamp,
+      })
+    })
+    return logs
+  }, [run, runId, control.pause_requested, control.stop_requested, runStatusEvents])
 
   return (
     <div data-testid="run-page" className="flex h-full bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
@@ -412,18 +450,23 @@ export default function WorkflowRunPage() {
       </div>
 
       <aside className="w-[380px] shrink-0 border-l border-line bg-panel/55 backdrop-blur flex flex-col">
+        <div className="p-3 border-b border-line">
+          <ActivityConsole
+            title="Execution Console"
+            subtitle="Live run state, HITL controls, and A2A handoffs"
+            logs={executionLogs}
+            active={streaming && !['completed', 'failed', 'stopped'].includes(run?.status)}
+            compact
+          />
+        </div>
         <div className="px-4 py-3 border-b border-line">
           <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Execution estimates</div>
-          <div className="space-y-2">
+          <div className="space-y-1.5 text-xs">
             {(timing.agent_estimates || []).map((item) => (
-              <div key={item.step_number} className={`rounded-lg border px-3 py-2 ${item.step_number === run?.current_step ? 'border-accent/35 bg-accent/10' : 'border-line bg-elev/30'}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-medium truncate">{item.agent_name}</div>
-                  <div className="text-[10px] font-mono text-muted">avg {formatDuration(item.avg_latency_ms)}</div>
-                </div>
-                <div className="text-[10px] font-mono text-muted mt-1">
-                  {item.actual_latency_ms != null ? `actual ${formatDuration(item.actual_latency_ms)}` : `${item.samples} historical sample${item.samples === 1 ? '' : 's'}`}
-                </div>
+              <div key={item.step_number} className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 ${item.step_number === run?.current_step ? 'text-accent' : 'text-muted'}`}>
+                <span className="truncate text-ink/85">{item.agent_name}</span>
+                <span className="font-mono">avg {formatDuration(item.avg_latency_ms)}</span>
+                <span className="font-mono text-white/35">{item.actual_latency_ms != null ? `actual ${formatDuration(item.actual_latency_ms)}` : `${item.samples}x`}</span>
               </div>
             ))}
           </div>
@@ -454,19 +497,79 @@ export default function WorkflowRunPage() {
                 {latestA2AMessageId === message.message_id && <span className="text-accent animate-pulse">live</span>}
                 {expandedMessageId === message.message_id ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
               </div>
-              <pre className={`text-[11px] font-mono text-muted whitespace-pre-wrap break-all ${expandedMessageId === message.message_id ? '' : 'line-clamp-4'}`}>{JSON.stringify(message.payload, null, 2)}</pre>
+              <div className={expandedMessageId === message.message_id ? '' : 'max-h-28 overflow-hidden'}>
+                <CodeSnippet code={JSON.stringify(message.payload, null, 2)} language="json" />
+              </div>
               <div className="text-[10px] font-mono text-muted mt-1.5">{(message.timestamp || '').slice(11, 19)}</div>
             </button>
           ))}
         </div>
       </aside>
 
-      <ModalShell open={showReport && !!report} onClose={() => setShowReport(false)} title={run?.workflow_name || 'Workflow report'} subtitle="Final output, citations, and governance findings." width="max-w-4xl">
-        <div className="p-6 bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
-          {report?.failure_reason && <div className="mb-4 p-3 rounded-lg border border-bad/30 bg-bad/10 text-bad text-sm">{report.failure_reason}</div>}
-          {report ? <MarkdownReport markdown={report.markdown || '# Report unavailable'} /> : <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-muted">Preparing report...</div>}
+      <ModalShell open={showReport && !!report} onClose={() => setShowReport(false)} title={run?.workflow_name || 'Workflow report'} subtitle="Final output, evidence, and governance findings." width="max-w-6xl">
+        <div className="grid gap-0 bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0 p-6">
+            <div className="mb-5 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-muted">Status</div>
+                <div className="mt-1 text-sm font-semibold text-ink">{report?.status || run?.status || 'unknown'}</div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-muted">Agents</div>
+                <div className="mt-1 text-sm font-semibold text-ink">{run?.agents?.length || 0}</div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-muted">Citations</div>
+                <div className="mt-1 text-sm font-semibold text-ink">{report?.citations?.length || 0}</div>
+              </div>
+            </div>
+            {report?.failure_reason && <div className="mb-4 p-3 rounded-lg border border-bad/30 bg-bad/10 text-bad text-sm">{report.failure_reason}</div>}
+            {report ? <MarkdownReport markdown={report.markdown || '# Report unavailable'} /> : <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-muted">Preparing report...</div>}
+          </div>
+          <aside className="border-t border-white/10 bg-black/10 p-5 lg:border-l lg:border-t-0">
+            <div className="sticky top-0">
+              <div className="text-[11px] uppercase tracking-widest text-muted">Report sources</div>
+              <div className="mt-3 max-h-[64vh] space-y-2 overflow-y-auto pr-1">
+                {(report?.citations || []).length === 0 && <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4 text-sm text-muted">No citations attached to this report.</div>}
+                {(report?.citations || []).map((citation, idx) => (
+                  <details key={`${citation.label}-${idx}`} open={activeCitation === citation} className="group rounded-xl border border-white/10 bg-white/[0.035]">
+                    <summary onClick={() => setActiveCitation(citation)} className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                      <span className="truncate text-ink">{citation.label || `Citation ${idx + 1}`}</span>
+                      <ChevronDown size={14} className="shrink-0 text-muted transition group-open:rotate-180" />
+                    </summary>
+                    <div className="border-t border-white/10 p-3">
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        <button onClick={() => copyText(activeCitationContent?.content || '')} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted hover:border-accent/30 hover:text-ink">
+                          <Copy size={12} /> Copy source
+                        </button>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-black/15 p-3 text-xs text-muted">
+                        <div className="text-[10px] uppercase tracking-widest text-muted">Direct source</div>
+                        <div className="mt-1 text-ink">{citation.label || citation.source_ref || `Citation ${idx + 1}`}</div>
+                        <div className="mt-1 font-mono text-[10px] text-accent">{citation.source_type || 'reference'} {citation.source_ref ? `| ${citation.source_ref}` : ''}</div>
+                      </div>
+                      <div className="mt-3 rounded-xl border border-white/10 bg-black/15 p-3">
+                        <div className="text-[10px] uppercase tracking-widest text-muted">Opened content</div>
+                        <div className="mt-2 max-h-52 overflow-y-auto">
+                          {loadingCitationContent && activeCitation === citation ? (
+                            <div className="inline-flex items-center gap-2 text-sm text-muted">
+                              <LoaderCircle size={14} className="animate-spin text-accent" /> Loading source content...
+                            </div>
+                          ) : activeCitation === citation ? (
+                            <MarkdownReport markdown={activeCitationContent?.content || citation.excerpt || 'No additional source content available.'} highlight={citation.excerpt || ''} />
+                          ) : (
+                            <div className="text-sm text-muted">Open this citation to load source content.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          </aside>
           {report?.pii_findings?.length > 0 && (
-            <div className="mt-6">
+            <div className="p-6 pt-0 lg:col-span-2">
               <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Detected PII redlines</div>
               <div className="space-y-2">
                 {report.pii_findings.map((item, idx) => (
@@ -479,56 +582,8 @@ export default function WorkflowRunPage() {
               </div>
             </div>
           )}
-          {report?.citations?.length > 0 && (
-            <div className="mt-6">
-              <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Citations</div>
-              <div className="flex flex-wrap gap-2">
-                {report.citations.map((citation, idx) => (
-                  <button key={idx} onClick={() => setActiveCitation(citation)} className="px-3 py-1.5 rounded-full border border-accent/30 bg-accent/10 text-accent text-xs hover:opacity-90">
-                    {citation.label || `Citation ${idx + 1}`}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </ModalShell>
-
-      {activeCitation && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-6" onClick={() => setActiveCitation(null)}>
-          <div className="w-full max-w-xl rounded-xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="font-display text-lg">{activeCitation.label || 'Citation'}</div>
-              <button onClick={() => setActiveCitation(null)} className="text-muted hover:text-ink text-sm">Close</button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button onClick={() => copyText(activeCitation.excerpt || '')} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted hover:border-accent/30 hover:text-ink">
-                <Copy size={12} />
-                Copy excerpt
-              </button>
-              <button onClick={() => copyText(activeCitationContent?.content || '')} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-muted hover:border-accent/30 hover:text-ink">
-                <Copy size={12} />
-                Copy opened source
-              </button>
-            </div>
-            <MarkdownReport markdown={activeCitation.excerpt || 'No excerpt provided.'} />
-            <div className="mt-4 text-[12px] text-muted">Source: {activeCitation.source_type || 'reference'} {activeCitation.source_ref ? `| ${activeCitation.source_ref}` : ''}</div>
-            <div className="mt-5 rounded-2xl border border-white/10 bg-panel/70 p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Opened source</div>
-              <div className="mt-3">
-                {loadingCitationContent ? (
-                  <div className="inline-flex items-center gap-2 text-sm text-muted">
-                    <LoaderCircle size={14} className="animate-spin text-accent" />
-                    Loading source content...
-                  </div>
-                ) : (
-                  <MarkdownReport markdown={activeCitationContent?.content || 'No additional source content available.'} />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -365,7 +365,7 @@ export default function AgentsPage() {
               Exported code is generated from the registered agent config so teams can inspect the prompt, model, framework shape, and configured tool list before promoting it elsewhere.
             </div>
             <div className="flex-1 overflow-auto p-5">
-              <CodeSnippet code={codeModal.content} />
+              <CodeSnippet code={codeModal.content} language={codeModal.framework === 'langflow' ? 'json' : 'python'} />
             </div>
           </div>
         </div>

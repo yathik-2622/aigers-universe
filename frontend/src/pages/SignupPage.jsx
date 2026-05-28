@@ -2,11 +2,12 @@ import React, { useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { signup } from '../api/auth.js'
 import { useAuth } from '../context/AuthContext.jsx'
 
-export default function LoginPage() {
+export default function SignupPage() {
   const navigate = useNavigate()
-  const { user, ready, login } = useAuth()
+  const { user, ready } = useAuth()
   const [form, setForm] = useState({ display_name: '', email: '' })
   const [busy, setBusy] = useState(false)
 
@@ -16,11 +17,11 @@ export default function LoginPage() {
     event.preventDefault()
     setBusy(true)
     try {
-      await login(form)
-      toast.success('Signed in')
-      navigate('/dashboard', { replace: true })
+      await signup(form)
+      toast.success('Account created. Please sign in.')
+      navigate('/login', { replace: true })
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Sign in failed')
+      toast.error(err?.response?.data?.detail || 'Sign up failed')
     } finally {
       setBusy(false)
     }
@@ -37,9 +38,9 @@ export default function LoginPage() {
       </Link>
 
       <form onSubmit={submit} className="w-full max-w-md rounded-3xl border border-line bg-panel/70 p-8 shadow-2xl shadow-black/20 backdrop-blur">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-accent">Secure workspace access</div>
-        <h1 className="font-display text-3xl tracking-tight">Sign in to resume your workflows</h1>
-        <p className="mt-3 text-sm text-muted">Your runs, uploaded documents, projects, and pending reviews are linked to your signed-in workspace identity.</p>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-accent">Create workspace identity</div>
+        <h1 className="font-display text-3xl tracking-tight">Sign up before entering AIger</h1>
+        <p className="mt-3 text-sm text-muted">Create your account with the same work email used in project invites so shared workflows become visible automatically.</p>
         <div className="mt-6 space-y-4">
           <input
             value={form.display_name}
@@ -55,12 +56,12 @@ export default function LoginPage() {
           />
         </div>
         <button disabled={busy || !form.display_name.trim() || !form.email.trim()} className="mt-6 w-full rounded-xl bg-accent py-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
-          {busy ? 'Signing in...' : 'Sign in'}
+          {busy ? 'Creating account...' : 'Sign up'}
         </button>
         <div className="mt-5 text-center text-sm text-muted">
-          Don&apos;t have an account?{' '}
-          <Link to="/signup" className="text-accent hover:underline">
-            Sign up
+          Already have an account?{' '}
+          <Link to="/login" className="text-accent hover:underline">
+            Sign in
           </Link>
         </div>
       </form>

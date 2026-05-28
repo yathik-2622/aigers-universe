@@ -1,65 +1,32 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Briefcase, ChevronDown, ChevronUp, Cpu, Eye, FileText, Github, Play, Save, Sparkles, Upload } from 'lucide-react'
+import { Briefcase, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Eye, FileText, Github, LoaderCircle, Play, Save, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { ReactFlowProvider } from 'reactflow'
 import { toast } from 'sonner'
 import { listProjects } from '../api/projects.js'
 import { listAgents, registerAgent } from '../api/platform.js'
-import { importGithubRepo, importWorkflowGithubRepo, uploadDocument, uploadWorkflowInput, listDocuments } from '../api/documents.js'
-import { autoBuildWorkflow, createWorkflow, getWorkflow, runWorkflow, updateWorkflow } from '../api/workflows.js'
+import { importGithubRepo, importWorkflowGithubRepo, ingestDocuments, uploadDocumentsMany, uploadWorkflowInput, listDocuments } from '../api/documents.js'
+import { createWorkflow, getWorkflow, runWorkflow, streamAutoBuildWorkflow, updateWorkflow } from '../api/workflows.js'
+import { apiErrorMessage } from '../api/client.js'
 import CustomSelect from '../components/common/CustomSelect.jsx'
 import FrameworkBadge from '../components/common/FrameworkBadge.jsx'
 import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
-import ModalShell from '../components/common/ModalShell.jsx'
+import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import WorkflowCanvas from '../components/flow/WorkflowCanvas.jsx'
 import { getCurrentProjectId, setCurrentProjectId } from '../lib/projectStorage.js'
 
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+const BUILDER_DRAFT_KEY = 'aigers.workflowBuilder.draft.v2'
 
-function TypedStreamLine({ text, tone }) {
-  const [visibleCount, setVisibleCount] = useState(0)
-  const finished = visibleCount >= text.length
+function logToneClass(tone) {
+  if (['ok', 'success', 'completed'].includes(tone)) return 'text-emerald-300'
+  if (['bad', 'error', 'failed'].includes(tone)) return 'text-rose-300'
+  if (['warn', 'warning'].includes(tone)) return 'text-amber-300'
+  return 'text-cyan-300'
+}
 
-  useEffect(() => {
-    setVisibleCount(0)
-    const interval = window.setInterval(() => {
-      setVisibleCount((current) => {
-        if (current >= text.length) {
-          window.clearInterval(interval)
-          return current
-        }
-        return current + 2
-      })
-    }, 18)
-    return () => window.clearInterval(interval)
-  }, [text])
-
-  const className = tone === 'ok'
-    ? 'text-emerald-200'
-    : tone === 'warn'
-      ? 'text-amber-200'
-      : tone === 'bad'
-        ? 'text-rose-200'
-        : tone === 'accent'
-          ? 'text-cyan-200'
-          : 'text-slate-200'
-
-  const prefix = tone === 'ok'
-    ? '[OK]'
-    : tone === 'warn'
-      ? '[WARN]'
-      : tone === 'bad'
-        ? '[FAIL]'
-        : tone === 'accent'
-          ? '[LIVE]'
-          : '[INFO]'
-
-  return (
-    <div className={`grid grid-cols-[68px_1fr] gap-3 whitespace-pre-wrap ${className}`}>
-      <span className="text-[10px] uppercase tracking-[0.22em] text-white/35">{prefix}</span>
-      <span>{text.slice(0, visibleCount)}{finished ? null : <span className="animate-pulse text-white/60">|</span>}</span>
-    </div>
-  )
+function builderDraftKey(workflowId) {
+  return `${BUILDER_DRAFT_KEY}:${workflowId || 'new'}`
 }
 
 export default function WorkflowBuilderPage() {
@@ -70,11 +37,15 @@ export default function WorkflowBuilderPage() {
   const [projects, setProjects] = useState([])
   const [projectId, setProjectId] = useState(getCurrentProjectId())
   const [selectedDocId, setSelectedDocId] = useState(null)
+  const [selectedKbDocIds, setSelectedKbDocIds] = useState([])
+  const [hiddenKbDocIds, setHiddenKbDocIds] = useState([])
   const [workflowInput, setWorkflowInput] = useState('')
   const [workflowFiles, setWorkflowFiles] = useState([])
   const [workflowInputDocs, setWorkflowInputDocs] = useState([])
+  const [selectedWorkflowInputDocIds, setSelectedWorkflowInputDocIds] = useState([])
   const [workflowRepoUrl, setWorkflowRepoUrl] = useState('')
   const [workflowRepoImport, setWorkflowRepoImport] = useState(null)
+  const [copiedWorkflowContext, setCopiedWorkflowContext] = useState(null)
   const [docCategory, setDocCategory] = useState('general')
   const [kbMode, setKbMode] = useState('upload')
   const [repoUrl, setRepoUrl] = useState('')
@@ -93,36 +64,101 @@ export default function WorkflowBuilderPage() {
   const [installingMissing, setInstallingMissing] = useState(false)
   const [constructingCanvas, setConstructingCanvas] = useState(false)
   const [creatingSuggestedAgents, setCreatingSuggestedAgents] = useState(false)
+  const [runningWorkflow, setRunningWorkflow] = useState(false)
   const [buildPhase, setBuildPhase] = useState('')
   const [orchestratorStream, setOrchestratorStream] = useState([])
   const [showOrchestratorPanel, setShowOrchestratorPanel] = useState(false)
   const [showPlanModal, setShowPlanModal] = useState(false)
+  const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false)
   const [plannerEditMode, setPlannerEditMode] = useState(false)
   const [plannerPromptDraft, setPlannerPromptDraft] = useState('')
   const [plannerNameDraft, setPlannerNameDraft] = useState('')
+  const [plannerQuestionAnswers, setPlannerQuestionAnswers] = useState({})
+  const [pendingPlannerInput, setPendingPlannerInput] = useState(false)
   const [focusedNodeId, setFocusedNodeId] = useState('')
   const fileInput = useRef(null)
   const workflowFileInput = useRef(null)
-  const streamContainerRef = useRef(null)
+  const draftHydratedRef = useRef(false)
+  const orchestratorLogRef = useRef(null)
+  const latestOrchestratorLabel = orchestratorStream[orchestratorStream.length - 1]?.label || buildPhase || 'Orchestrator'
 
-  const pushOrchestratorLine = (tone, text) => {
+  const applyBuilderDraft = (draft) => {
+    if (!draft) return false
+    setNodes(draft.nodes || [])
+    setEdges(draft.edges || [])
+    setName(draft.name || 'Untitled workflow')
+    setWorkflowInput(draft.workflowInput || '')
+    setAutoPrompt(draft.autoPrompt || '')
+    setProjectId(draft.projectId || getCurrentProjectId())
+    setSelectedKbDocIds(draft.selectedKbDocIds || [])
+    setSelectedDocId(draft.selectedDocId || null)
+    setWorkflowInputDocs(draft.workflowInputDocs || [])
+    setSelectedWorkflowInputDocIds(draft.selectedWorkflowInputDocIds || (draft.workflowInputDocs || []).map((doc) => doc.document_id).filter(Boolean))
+    setWorkflowRepoUrl(draft.workflowRepoUrl || '')
+    setWorkflowRepoImport(draft.workflowRepoImport || null)
+    setCopiedWorkflowContext(draft.copiedWorkflowContext || null)
+    setKbMode(draft.kbMode || 'upload')
+    setDocCategory(draft.docCategory || 'general')
+    setRepoUrl(draft.repoUrl || '')
+    setOrchestratorStream(draft.orchestratorStream || [])
+    return true
+  }
+
+  const pushOrchestratorLine = (tone, text, label = '') => {
     setOrchestratorStream((current) => {
-      const line = { id: `${Date.now()}-${current.length}`, tone, text }
+      const line = { id: `${Date.now()}-${current.length}`, tone, text, label }
       return [...current.slice(-15), line]
     })
   }
 
   useEffect(() => {
-    const container = streamContainerRef.current
-    if (!container) return
-    container.scrollTop = container.scrollHeight
-  }, [orchestratorStream, buildPhase])
+    if (workflowId || draftHydratedRef.current) return
+    draftHydratedRef.current = true
+    try {
+      const draft = JSON.parse(localStorage.getItem(builderDraftKey(null)) || localStorage.getItem(BUILDER_DRAFT_KEY) || 'null')
+      if (applyBuilderDraft(draft) && (draft.nodes || []).length) toast.message('Restored unsaved workflow draft')
+    } catch {}
+  }, [workflowId])
+
+  useEffect(() => {
+    if (!draftHydratedRef.current) return
+    const draft = {
+      nodes,
+      edges,
+      name,
+      workflowInput,
+      autoPrompt,
+      projectId,
+      selectedKbDocIds,
+      selectedDocId,
+      workflowInputDocs,
+      selectedWorkflowInputDocIds,
+      workflowRepoUrl,
+      workflowRepoImport,
+      copiedWorkflowContext,
+      kbMode,
+      docCategory,
+      repoUrl,
+      orchestratorStream,
+      saved_at: new Date().toISOString(),
+    }
+    try { localStorage.setItem(builderDraftKey(savedId || workflowId), JSON.stringify(draft)) } catch {}
+  }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, selectedWorkflowInputDocIds, workflowRepoUrl, workflowRepoImport, copiedWorkflowContext, kbMode, docCategory, repoUrl, orchestratorStream])
+
+  useEffect(() => {
+    if (!orchestratorLogRef.current) return
+    orchestratorLogRef.current.scrollTop = orchestratorLogRef.current.scrollHeight
+  }, [orchestratorStream.length, showOrchestratorPanel])
 
   const refresh = async () => {
-    const [a, d, pr] = await Promise.all([listAgents(), listDocuments(), listProjects()])
-    setAgents(a.agents || [])
-    setDocs(d.documents || [])
-    setProjects(pr.projects || [])
+    try {
+      const [a, d, pr] = await Promise.all([listAgents(), listDocuments(), listProjects()])
+      setAgents(a.agents || [])
+      setDocs(d.documents || [])
+      setProjects(pr.projects || [])
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to load builder data'))
+    }
   }
 
   const animateCanvasBuild = async (plan) => {
@@ -164,40 +200,78 @@ export default function WorkflowBuilderPage() {
     setAutoPlan(plan)
     setPlannerPromptDraft(promptText.trim())
     setPlannerNameDraft(plan.workflow_name || 'Auto-built workflow')
+    setPlannerQuestionAnswers({})
     setPlannerEditMode(false)
-    setShowPlanModal(true)
+    setShowPlanModal(!(plan.missing_templates || []).length)
+    setPlanPanelCollapsed(false)
   }
 
-  const buildFromPrompt = async (autoInstallMissing = false) => {
-    const promptText = autoPrompt.trim() || workflowInput.trim()
+  const buildFromPrompt = async (autoInstallMissing = false, promptOverride = '') => {
+    const promptText = (promptOverride || autoPrompt || workflowInput).trim()
     if (promptText.length < 12) return toast.error('Describe the workflow goal in a little more detail first')
     setOrchestratorStream([])
     setShowOrchestratorPanel(true)
-    pushOrchestratorLine('accent', `Interpreting intent from prompt: "${promptText.slice(0, 140)}${promptText.length > 140 ? '...' : ''}"`)
+    pushOrchestratorLine('accent', `Interpreting intent from prompt: "${promptText.slice(0, 140)}${promptText.length > 140 ? '...' : ''}"`, 'Reasoning')
     if (autoInstallMissing) {
       setBuildPhase('Installing required agents and rebuilding workflow')
       setInstallingMissing(true)
-      pushOrchestratorLine('warn', 'Missing capabilities detected earlier. Replanning with marketplace installation enabled.')
+      pushOrchestratorLine('warn', 'Installing the approved exact-match marketplace agents.', 'Installing')
     } else {
       setBuildPhase('Analyzing your request and mapping the right agents')
       setAutoBuilding(true)
-      pushOrchestratorLine('info', 'Checking installed agents and marketplace coverage.')
+      pushOrchestratorLine('info', 'Checking installed agents and marketplace coverage.', 'Checking marketplace')
     }
     try {
-      const plan = await autoBuildWorkflow({
+      let plan = null
+      await streamAutoBuildWorkflow({
         prompt: promptText,
         project_id: projectId || null,
         auto_install_missing: autoInstallMissing,
+      }, {
+        onStatus: (event) => {
+          pushOrchestratorLine(event.tone || event.status || 'info', event.detail || event.text || event.label || 'Planner event received.', event.label || event.stage || 'Thinking')
+          if (event.stage) setBuildPhase(event.stage)
+        },
+        onRequiresInput: (event) => {
+          pushOrchestratorLine('warn', event.detail || 'Planner paused for clarification.', 'Asking questions')
+          plan = event.partial_plan || {
+            workflow_name: 'Clarification needed',
+            workflow_description: promptText,
+            clarifying_questions: event.questions || [],
+            ready: false,
+            nodes: [],
+            edges: [],
+          }
+          setAutoPlan(plan)
+          setPlannerPromptDraft(promptText)
+          setPlannerNameDraft(plan.workflow_name || 'Clarification needed')
+          setPlannerQuestionAnswers({})
+          setPendingPlannerInput(true)
+        },
+        onFinalPlan: (event) => {
+          plan = event.plan
+        },
+        onError: (event) => {
+          throw new Error(event.detail || event.error || 'Planner stream failed')
+        },
       })
-      pushOrchestratorLine('ok', `Planner resolved ${plan.selected_agent_ids?.length || 0} installed agent(s) and ${plan.missing_templates?.length || 0} missing template(s).`)
+      if (!plan) return
+      if ((plan.clarifying_questions || []).length > 0 && !plan.ready) {
+        toast.message('Planner paused for your answers before assembling the workflow')
+        return
+      }
+      pushOrchestratorLine('ok', `Planner resolved ${plan.selected_agent_ids?.length || 0} installed agent(s) and ${plan.missing_templates?.length || 0} missing template(s).`, 'Planning agents')
       if ((plan.market_research || []).length > 0) {
-        pushOrchestratorLine('accent', `Live market research returned ${plan.market_research.length} grounded finding(s).`)
+        pushOrchestratorLine('accent', `Live market research returned ${plan.market_research.length} grounded finding(s).`, 'Researching market')
       } else {
-        pushOrchestratorLine('warn', 'Live market research was unavailable, so the planner fell back to readiness heuristics.')
+        pushOrchestratorLine('warn', 'Live market research was unavailable, so the planner fell back to readiness heuristics.', 'Researching market')
       }
-      if ((plan.agent_creation_suggestions || []).length > 0) {
-        pushOrchestratorLine('info', `Prepared ${plan.agent_creation_suggestions.length} custom agent draft suggestion(s) for uncovered capabilities.`)
+      if ((plan.auto_created_agents || []).length > 0) {
+        pushOrchestratorLine('ok', `Created ${plan.auto_created_agents.length} custom agent(s) for uncovered capabilities.`, 'Creating agents')
+      } else if ((plan.agent_creation_suggestions || []).length > 0) {
+        pushOrchestratorLine('info', `Prepared ${plan.agent_creation_suggestions.length} custom agent draft suggestion(s) for uncovered capabilities.`, 'Creating agents')
       }
+      setPendingPlannerInput(false)
       await applyAutoPlan(plan, promptText)
       if (plan.missing_templates?.length) {
         toast.message('Required agents are available in Marketplace and ready to install')
@@ -206,7 +280,7 @@ export default function WorkflowBuilderPage() {
       }
       await refresh()
     } catch (err) {
-      pushOrchestratorLine('bad', err?.response?.data?.detail || err?.message || 'Planner failed before the workflow could be assembled.')
+      pushOrchestratorLine('bad', err?.response?.data?.detail || err?.message || 'Planner failed before the workflow could be assembled.', 'Issue')
       toast.error(err?.response?.data?.detail || 'Auto-build failed')
     } finally {
       setAutoBuilding(false)
@@ -243,12 +317,20 @@ export default function WorkflowBuilderPage() {
   }
 
   const replanPlanner = async () => {
-    const nextPrompt = plannerPromptDraft.trim() || autoPrompt.trim() || workflowInput.trim()
+    const answers = Object.entries(plannerQuestionAnswers)
+      .filter(([, value]) => String(value || '').trim())
+      .map(([question, answer]) => `Question: ${question}\nAnswer: ${String(answer).trim()}`)
+      .join('\n\n')
+    const nextPrompt = [
+      plannerPromptDraft.trim() || autoPrompt.trim() || workflowInput.trim(),
+      answers ? `Clarifications:\n${answers}` : '',
+    ].filter(Boolean).join('\n\n')
     if (nextPrompt.length < 12) return toast.error('Add a clearer workflow goal before replanning')
     setAutoPrompt(nextPrompt)
     setShowPlanModal(false)
     setPlannerEditMode(false)
-    await buildFromPrompt(false)
+    setPendingPlannerInput(false)
+    await buildFromPrompt(false, nextPrompt)
   }
 
   const createSuggestedAgentDrafts = async () => {
@@ -294,7 +376,12 @@ export default function WorkflowBuilderPage() {
         setProjectId(wf.project_id || getCurrentProjectId())
         if (wf.canvas?.nodes) setNodes(wf.canvas.nodes)
         if (wf.canvas?.edges) setEdges(wf.canvas.edges)
-      }).catch(() => {})
+        try {
+          const draft = JSON.parse(localStorage.getItem(builderDraftKey(wf.workflow_id)) || 'null')
+          if (applyBuilderDraft(draft)) toast.message('Restored local workflow changes')
+        } catch {}
+        draftHydratedRef.current = true
+      }).catch((err) => toast.error(apiErrorMessage(err, 'Failed to load workflow')))
     }
   }, [workflowId])
 
@@ -311,24 +398,53 @@ export default function WorkflowBuilderPage() {
       : constructingCanvas
         ? 'Constructing canvas'
         : 'Auto-build workflow')
-  const latestOrchestratorLine = orchestratorStream[orchestratorStream.length - 1]?.text || ''
+  const hasDesignDocument = !!autoPlan?.enterprise_report?.design_document_markdown
 
   const onDragStart = (e, agent) => {
     e.dataTransfer.setData('application/agent', JSON.stringify(agent))
     e.dataTransfer.effectAllowed = 'move'
   }
 
+  const visibleDocs = useMemo(() => docs.filter((doc) => !hiddenKbDocIds.includes(doc.document_id)), [docs, hiddenKbDocIds])
+
+  const toggleKbDocument = (documentId) => {
+    setSelectedKbDocIds((current) => (
+      current.includes(documentId)
+        ? current.filter((item) => item !== documentId)
+        : [...current, documentId]
+    ))
+    setSelectedDocId(documentId)
+  }
+
+  const hideKbDocument = (documentId) => {
+    setHiddenKbDocIds((current) => (current.includes(documentId) ? current : [...current, documentId]))
+    setSelectedKbDocIds((current) => current.filter((item) => item !== documentId))
+    if (selectedDocId === documentId) setSelectedDocId(null)
+  }
+
   const handleUpload = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
     setKbFileUploading(true)
     try {
-      const res = await uploadDocument(file, docCategory)
-      toast.success(`Uploaded ${res.filename} (${res.chunk_count} chunks indexed)`)
-      setSelectedDocId(res.document_id)
-      refresh()
-    } catch {
-      toast.error('Upload failed')
+      const res = await uploadDocumentsMany(files, { category: docCategory })
+      const successful = (res.documents || []).filter((item) => !item.error && item.document_id)
+      const duplicates = (res.documents || []).filter((item) => item.duplicate && item.existing_document?.document_id)
+      const failed = (res.documents || []).filter((item) => item.error)
+      const duplicateDocs = duplicates.map((item) => item.existing_document)
+      const selectableIds = [...successful.map((item) => item.document_id), ...duplicateDocs.map((item) => item.document_id)]
+      setDocs((current) => {
+        const existing = new Set(current.map((doc) => doc.document_id))
+        return [...current, ...duplicateDocs.filter((doc) => doc?.document_id && !existing.has(doc.document_id))]
+      })
+      setSelectedKbDocIds((current) => [...new Set([...current, ...selectableIds])])
+      if (selectableIds[0]) setSelectedDocId(selectableIds[0])
+      if (successful.length) await ingestDocuments(successful.map((item) => item.document_id))
+      if (duplicates.length) toast.message(`${duplicates.length} file${duplicates.length === 1 ? ' is' : 's are'} already in Knowledge Base. I selected the existing KB document instead.`)
+      toast.success(`Uploaded ${successful.length} new KB file${successful.length === 1 ? '' : 's'}${failed.length ? `, ${failed.length} failed` : ''}`)
+      await refresh()
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Upload failed'))
     } finally {
       setKbFileUploading(false)
       if (fileInput.current) fileInput.current.value = ''
@@ -342,6 +458,7 @@ export default function WorkflowBuilderPage() {
       const res = await importGithubRepo(repoUrl.trim(), docCategory)
       toast.success(`Imported ${res.files_indexed} repo files`)
       setSelectedDocId(res.document_id)
+      setSelectedKbDocIds((current) => [...new Set([...current, res.document_id])])
       setRepoUrl('')
       refresh()
     } catch (err) {
@@ -361,11 +478,12 @@ export default function WorkflowBuilderPage() {
         uploaded.push(res)
       }
       setWorkflowInputDocs((prev) => [...prev, ...uploaded])
+      setSelectedWorkflowInputDocIds((prev) => Array.from(new Set([...prev, ...uploaded.map((doc) => doc.document_id).filter(Boolean)])))
       setWorkflowFiles([])
       toast.success(`Uploaded ${uploaded.length} workflow input file${uploaded.length > 1 ? 's' : ''}`)
       return [...workflowInputDocs, ...uploaded]
-    } catch {
-      toast.error('Workflow input upload failed')
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Workflow input upload failed'))
       return workflowInputDocs
     } finally {
       setWorkflowFileUploading(false)
@@ -420,6 +538,11 @@ export default function WorkflowBuilderPage() {
       const res = savedId ? await updateWorkflow(savedId, body) : await createWorkflow(body)
       toast.success(savedId ? 'Workflow updated' : 'Workflow saved')
       setSavedId(res.workflow_id)
+      try {
+        localStorage.removeItem(builderDraftKey(null))
+        localStorage.removeItem(builderDraftKey(savedId || res.workflow_id))
+        localStorage.removeItem(BUILDER_DRAFT_KEY)
+      } catch {}
       navigate(`/builder/${res.workflow_id}`, { replace: true })
       return res.workflow_id
     } catch {
@@ -428,38 +551,52 @@ export default function WorkflowBuilderPage() {
   }
 
   const run = async () => {
+    setRunningWorkflow(true)
     let id = savedId
-    if (!id) {
-      id = await save()
-      if (!id) return
-    }
-    const needsKbDocument = kbMode !== 'tools'
-    if (needsKbDocument && !selectedDocId && docs.length === 0) return toast.error('Upload or import a knowledge-base source first')
-    const docId = needsKbDocument ? (selectedDocId || docs[0]?.document_id) : ''
-    const uploadedWorkflowDocs = await uploadWorkflowFilesNow()
-    if (workflowFiles.length > 0 && uploadedWorkflowDocs.length === workflowInputDocs.length) return
-    const workflowRepoDoc = await ensureWorkflowRepoImport()
-    if (workflowRepoUrl.trim() && !workflowRepoDoc) return
+    let navigatingToRun = false
     try {
+      if (!id) {
+        id = await save()
+        if (!id) return
+      }
+      const needsKbDocument = kbMode !== 'tools'
+      if (needsKbDocument && selectedKbDocIds.length === 0) {
+        toast.error('Select one or more knowledge-base documents for this workflow')
+        return
+      }
+      const docId = needsKbDocument ? selectedKbDocIds[0] : ''
+      const uploadedWorkflowDocs = await uploadWorkflowFilesNow()
+      if (workflowFiles.length > 0 && uploadedWorkflowDocs.length === workflowInputDocs.length) return
+      const selectedWorkflowIds = selectedWorkflowInputDocIds.length > 0
+        ? selectedWorkflowInputDocIds
+        : uploadedWorkflowDocs.map((doc) => doc.document_id).filter(Boolean)
+      const selectedWorkflowDocs = uploadedWorkflowDocs.filter((doc) => selectedWorkflowIds.includes(doc.document_id))
+      const workflowRepoDoc = await ensureWorkflowRepoImport()
+      if (workflowRepoUrl.trim() && !workflowRepoDoc) return
       const res = await runWorkflow(id, {
         input_data: {
           document_id: docId,
           filename: docs.find((d) => d.document_id === docId)?.filename || '',
+          kb_document_ids: needsKbDocument ? selectedKbDocIds : [],
           user_prompt: workflowInput,
           kb_mode: kbMode,
           repo_url: kbMode === 'github' ? repoUrl.trim() : '',
           workflow_inputs: {
             text: workflowInput,
-            upload_document_ids: uploadedWorkflowDocs.map((doc) => doc.document_id),
+            upload_document_ids: selectedWorkflowDocs.map((doc) => doc.document_id),
+            kb_document_ids: needsKbDocument ? selectedKbDocIds : [],
             repo_document_id: workflowRepoDoc?.document_id || '',
             repo_url: workflowRepoDoc?.repo_url || workflowRepoUrl.trim(),
           },
         },
       })
       toast.success('Workflow started')
+      navigatingToRun = true
       navigate(`/runs/${res.run_id}`)
-    } catch {
-      toast.error('Run failed to start')
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Run failed to start'))
+    } finally {
+      if (!navigatingToRun) setRunningWorkflow(false)
     }
   }
 
@@ -476,24 +613,50 @@ export default function WorkflowBuilderPage() {
           <button onClick={() => buildFromPrompt(false)} disabled={autoBuilding || installingMissing || constructingCanvas} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50">
             <Sparkles size={14} /> {isPlannerBusy ? plannerStatusLabel : 'Auto-build workflow'}
           </button>
-          {isPlannerBusy && (
-            <div className="mt-3 rounded-2xl border border-cyan-300/20 bg-[#08111f] px-3 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
-              <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-cyan-100/65">
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.9)] animate-pulse" />
-                  Planning workflow
-                </span>
-                <span>{plannerStatusLabel}</span>
-              </div>
-              <div className="mt-2 rounded-xl border border-white/8 bg-black/20 px-3 py-2 font-mono text-[12px] leading-6 text-cyan-100">
-                {latestOrchestratorLine || `Live phase: ${plannerStatusLabel}`}
-              </div>
-            </div>
-          )}
-          {autoPlan && <button onClick={() => setShowPlanModal(true)} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-white/5 text-sm hover:border-accent/40">Open planner summary</button>}
+            {autoPlan && (autoPlan.missing_templates || []).length === 0 && <button onClick={() => { setPlanPanelCollapsed(false); setShowPlanModal((value) => !value) }} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-white/5 text-sm hover:border-accent/40">{showPlanModal ? 'Close planner summary' : 'Open planner summary'}</button>}
         </div>
 
         <div className="text-[11px] uppercase tracking-widest text-muted mb-3">Drag agents to canvas</div>
+        {copiedWorkflowContext && (
+          <div className="mb-5 rounded-2xl border border-accent/25 bg-accent/10 p-4">
+            <div className="text-[11px] uppercase tracking-widest text-accent">Copied workflow context</div>
+            <div className="mt-2 text-sm font-medium text-ink">{copiedWorkflowContext.source_name || 'Copied workflow'}</div>
+            <div className="mt-1 text-[11px] text-muted">Source: {copiedWorkflowContext.source_workflow_id}</div>
+            <div className="mt-3 grid gap-2 text-[12px] text-muted">
+              <div>{(copiedWorkflowContext.agents || []).length} source agent(s)</div>
+              <div>{(copiedWorkflowContext.runs || []).length} previous run(s) carried as metadata</div>
+            </div>
+            {(copiedWorkflowContext.input_bindings || []).length > 0 && (
+              <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Tools and input bindings</summary>
+                <div className="mt-2 space-y-2">
+                  {(copiedWorkflowContext.input_bindings || []).slice(0, 6).map((item, index) => (
+                    <div key={`${item.agent}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+                      <div className="text-[12px] text-ink">{item.agent}</div>
+                      <div className="mt-1 text-[11px] text-muted">Tools: {(item.tools || []).join(', ') || 'None recorded'}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {(copiedWorkflowContext.runs || []).length > 0 && (
+              <details className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Previous runs and inputs</summary>
+                <div className="mt-2 space-y-2">
+                  {(copiedWorkflowContext.runs || []).slice(0, 5).map((run) => (
+                    <div key={run.run_id} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] text-muted">
+                      <div className="font-mono text-accent">{run.run_id}</div>
+                      <div>Status: {run.status}</div>
+                      <div className="line-clamp-2">Prompt: {run.prompt || 'No prompt captured'}</div>
+                      <div>Uploaded files: {run.uploaded_file_count ?? (run.uploaded_files || []).length} | KB docs: {run.kb_document_count ?? (run.kb_documents || []).length}</div>
+                      {run.repo_url && <div className="truncate">Repo: {run.repo_url}</div>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
         <div className="space-y-2 mb-6">
           {agents.length === 0 && (
             <div className="text-sm text-muted py-6 text-center border border-dashed border-line rounded-lg">
@@ -546,8 +709,23 @@ export default function WorkflowBuilderPage() {
         </div>
         {(workflowInputDocs.length > 0 || workflowRepoImport) && (
           <div className="mb-4 space-y-1">
+            {workflowInputDocs.length > 0 && (
+              <div className="mb-2 text-[11px] text-muted">Tick files to include when rerunning this workflow.</div>
+            )}
             {workflowInputDocs.map((doc) => (
               <div key={doc.document_id} className="w-full px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 border-line bg-elev/40 text-muted">
+                <input
+                  type="checkbox"
+                  checked={selectedWorkflowInputDocIds.includes(doc.document_id)}
+                  onChange={(event) => {
+                    setSelectedWorkflowInputDocIds((current) => {
+                      if (event.target.checked) return Array.from(new Set([...current, doc.document_id]))
+                      return current.filter((id) => id !== doc.document_id)
+                    })
+                  }}
+                  className="h-3.5 w-3.5 accent-accent"
+                  title="Include this file in the next run"
+                />
                 <button onClick={() => setActiveDocumentId(doc.document_id)} className="flex items-center gap-2 truncate flex-1 text-left">
                   <FileText size={12} />
                   <span className="truncate flex-1">{doc.filename}</span>
@@ -573,6 +751,7 @@ export default function WorkflowBuilderPage() {
           value={kbMode}
           onChange={setKbMode}
           options={[
+            { value: 'knowledge_base', label: 'Use existing knowledge base' },
             { value: 'upload', label: 'Upload KB files' },
             { value: 'github', label: 'Use external GitHub repo context' },
             { value: 'tools', label: 'Rely on external MCP/web tools' },
@@ -595,9 +774,9 @@ export default function WorkflowBuilderPage() {
         />
         {kbMode === 'upload' && (
           <>
-            <input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md,.json,.html,.xml,.yaml,.yml,.py,.js,.ts,.tsx,.jsx,.java,.go,.rb,.sql,.toml,.ini,.cfg" onChange={handleUpload} className="hidden" data-testid="doc-upload-input" />
+            <input ref={fileInput} type="file" multiple accept=".pdf,.docx,.txt,.md,.json,.html,.xml,.yaml,.yml,.py,.js,.ts,.tsx,.jsx,.java,.go,.rb,.sql,.toml,.ini,.cfg" onChange={handleUpload} className="hidden" data-testid="doc-upload-input" />
             <button data-testid="doc-upload-btn" onClick={() => fileInput.current?.click()} disabled={kbFileUploading} className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-accent/40 text-accent text-sm hover:bg-accent/5 disabled:opacity-50">
-              <Upload size={14} /> {kbFileUploading ? 'Uploading KB file...' : 'Upload docs to KB'}
+              <Upload size={14} /> {kbFileUploading ? 'Uploading KB files...' : 'Upload one or more docs to KB'}
             </button>
             <div className="text-[11px] text-muted mt-2">Use KB uploads for reusable context that agents should search through the `knowledge_base_search` MCP tool.</div>
           </>
@@ -616,17 +795,25 @@ export default function WorkflowBuilderPage() {
             This workflow will rely on external MCP and realtime tools instead of a new KB upload. Configure tools on agent nodes, including `knowledge_base_search` when needed, from the builder and AIger Copilot.
           </div>
         )}
-        {docs.length > 0 && (
+        {kbMode === 'knowledge_base' && (
+          <div className="text-[11px] text-muted rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+            Select specific embedded Mongo KB documents below. The run will scope grounding to only those selected document IDs.
+          </div>
+        )}
+        {visibleDocs.length > 0 && kbMode !== 'tools' && (
           <div className="mt-3 space-y-1">
-            {docs.slice(0, 6).map((d) => (
-              <div key={d.document_id} className={`w-full px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 ${selectedDocId === d.document_id ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-elev/40 text-muted hover:border-accent/30'}`}>
-                <button onClick={() => setSelectedDocId(d.document_id)} data-testid={`doc-select-${d.document_id}`} className="flex items-center gap-2 truncate flex-1 text-left">
+            {visibleDocs.slice(0, 8).map((d) => (
+              <div key={d.document_id} className={`w-full px-2.5 py-1.5 rounded border text-[12px] flex items-center gap-2 ${selectedKbDocIds.includes(d.document_id) ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-elev/40 text-muted hover:border-accent/30'}`}>
+                <button onClick={() => toggleKbDocument(d.document_id)} data-testid={`doc-select-${d.document_id}`} className="flex items-center gap-2 truncate flex-1 text-left">
                   <FileText size={12} />
                   <span className="truncate flex-1">{d.filename}</span>
                   <span className="text-[10px] font-mono">{d.chunk_count}c</span>
                 </button>
                 <button onClick={() => setActiveDocumentId(d.document_id)} className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 p-1.5 text-muted hover:text-ink">
                   <Eye size={12} />
+                </button>
+                <button onClick={() => hideKbDocument(d.document_id)} title="Hide from builder list" className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 p-1.5 text-muted hover:text-bad">
+                  <Trash2 size={12} />
                 </button>
               </div>
             ))}
@@ -645,15 +832,15 @@ export default function WorkflowBuilderPage() {
             <button
               type="button"
               onClick={() => setShowOrchestratorPanel((value) => !value)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-1.5 text-sm hover:border-accent/40"
+              className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-1.5 text-sm hover:border-accent/40 ${(autoBuilding || installingMissing || constructingCanvas) ? 'animate-pulse text-cyan-200' : ''}`}
             >
-              <Sparkles size={13} /> Orchestrator log {showOrchestratorPanel ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              <Sparkles size={13} /> {latestOrchestratorLabel}{showOrchestratorPanel ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
             <button data-testid="save-workflow-btn" onClick={save} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-line bg-panel/80 text-sm hover:border-accent/40">
               <Save size={13} /> Save
             </button>
-            <button data-testid="run-workflow-btn" onClick={run} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90">
-              <Play size={13} /> Run workflow
+            <button data-testid="run-workflow-btn" onClick={run} disabled={runningWorkflow} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-60">
+              {runningWorkflow ? <LoaderCircle size={13} className="animate-spin" /> : <Play size={13} />} {runningWorkflow ? 'Starting...' : 'Run workflow'}
             </button>
           </div>
         </div>
@@ -661,56 +848,124 @@ export default function WorkflowBuilderPage() {
           <WorkflowCanvas initialNodes={nodes} initialEdges={edges} activeNodeId={focusedNodeId} onChange={(n, e) => { setNodes(n); setEdges(e) }} />
         </ReactFlowProvider>
         {showOrchestratorPanel && (orchestratorStream.length > 0 || constructingCanvas || autoBuilding || installingMissing) && (
-          <div className="absolute right-4 top-16 z-20 w-[min(560px,calc(100%-2rem))] overflow-hidden rounded-[24px] border border-cyan-300/18 bg-[#07111d] shadow-[0_24px_70px_rgba(0,0,0,0.34)]">
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(34,211,238,0.08),transparent_25%),repeating-linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.04)_1px,transparent_1px,transparent_28px)] opacity-70" />
-            <div className="relative z-10 px-5 py-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-cyan-200">
-                  <Sparkles size={12} />
-                  Orchestrator activity stream
+          <div className="absolute right-4 top-16 z-20 w-[min(780px,calc(100%-2rem))]">
+            <div className="overflow-hidden rounded-2xl border border-cyan-300/20 bg-[#05070b]/80 shadow-[0_24px_90px_rgba(0,0,0,0.3)] backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                <div className="min-w-0">
+                  <div className={`truncate text-sm font-medium ${(autoBuilding || installingMissing || constructingCanvas) ? 'text-cyan-200 animate-pulse' : 'text-ink'}`}>{latestOrchestratorLabel}</div>
+                  <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.18em] text-white/35">{buildPhase || 'Planner events'}</div>
                 </div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-cyan-100/80">
-                  <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.9)] animate-pulse" />
-                  Live
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{orchestratorStream.length}</span>
+              </div>
+              <div ref={orchestratorLogRef} className="max-h-[165px] overflow-y-auto px-4 py-3 font-mono">
+                {orchestratorStream.length === 0 && <div className="text-[12px] text-white/40">Waiting for orchestration activity...</div>}
+                <div className="space-y-2.5">
+                  {orchestratorStream.map((line, index) => (
+                    <div key={line.id} className={`text-[12px] leading-5 ${index === orchestratorStream.length - 1 && isPlannerBusy ? 'animate-[fadeUp_0.35s_ease]' : ''}`}>
+                      <span className="mr-2 text-white/25">{String(index + 1).padStart(2, '0')}</span>
+                      <span className={`mr-2 font-semibold ${logToneClass(line.tone)}`}>{line.label || 'Thinking'}</span>
+                      <span className="text-white/58">{line.text}</span>
+                      {index === orchestratorStream.length - 1 && isPlannerBusy && (
+                        <span className="ml-2 inline-flex w-8 items-center gap-0.5 align-middle text-cyan-200">
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200 [animation-delay:120ms]" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-200 [animation-delay:240ms]" />
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="mb-3 rounded-2xl border border-white/8 bg-black/25 px-4 py-3">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-white/35">Current planner phase</div>
-                <div className="mt-2 font-mono text-[13px] text-cyan-100">
-                  {buildPhase || 'Waiting for the next orchestration step'}
-                </div>
-              </div>
-              <div ref={streamContainerRef} className="max-h-[300px] space-y-2 overflow-auto rounded-2xl border border-white/8 bg-black/20 p-4 pr-3 font-mono text-[12px] leading-6">
-                {orchestratorStream.map((line) => (
-                  <TypedStreamLine key={line.id} text={line.text} tone={line.tone} />
-                ))}
-                {(constructingCanvas || autoBuilding || installingMissing) && (
-                  <TypedStreamLine
-                    key={`phase-${buildPhase || 'active'}`}
-                    text={buildPhase ? `Live phase: ${buildPhase}` : 'Live phase: awaiting the next planner event'}
-                    tone="accent"
-                  />
-                )}
-              </div>
+              {pendingPlannerInput && (autoPlan?.clarifying_questions || []).length > 0 && (
+                <details open className="border-t border-cyan-300/15 bg-cyan-300/[0.04]">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-cyan-200">Step input required</summary>
+                  <div className="max-h-[calc(100vh-430px)] overflow-y-auto px-4 pb-4">
+                    <div className="text-[12px] text-white/55">Answer these and send them back into the same planning run.</div>
+                    <div className="mt-3 space-y-3">
+                      {autoPlan.clarifying_questions.map((question, idx) => (
+                        <label key={`${question}-${idx}`} className="block">
+                          <span className="text-[12px] text-white/78">{question}</span>
+                          <input
+                            value={plannerQuestionAnswers[question] || ''}
+                            onChange={(event) => setPlannerQuestionAnswers((prev) => ({ ...prev, [question]: event.target.value }))}
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2 text-sm outline-none focus:border-cyan-300/40"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <button onClick={replanPlanner} disabled={autoBuilding} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
+                      Send answers to orchestrator
+                    </button>
+                  </div>
+                </details>
+              )}
+              {!pendingPlannerInput && (autoPlan?.missing_templates || []).length > 0 && (
+                <details open className="border-t border-cyan-300/15 bg-cyan-300/[0.04]">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-cyan-200">Marketplace approval</summary>
+                  <div className="max-h-[calc(100vh-430px)] overflow-y-auto px-4 pb-4">
+                    <div className="text-[12px] text-white/55">Exact-match seed agents are available. Install them before the final architecture panel opens.</div>
+                    <div className="mt-3 space-y-2">
+                      {autoPlan.missing_templates.map((item) => (
+                        <div key={item.template_id} className="rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2">
+                          <div className="text-sm text-ink">{item.name}</div>
+                          <div className="mt-1 text-[12px] text-muted">{item.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => buildFromPrompt(true, plannerPromptDraft || autoPrompt || workflowInput)} disabled={installingMissing} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
+                      {installingMissing ? 'Installing and rebuilding...' : 'Install exact-match agents'}
+                    </button>
+                  </div>
+                </details>
+              )}
             </div>
           </div>
         )}
       </div>
       <DocumentViewerModal documentId={activeDocumentId} open={!!activeDocumentId} onClose={() => setActiveDocumentId('')} />
-      <ModalShell
-        open={showPlanModal && !!autoPlan}
-        onClose={() => setShowPlanModal(false)}
-        title={plannerNameDraft || autoPlan?.workflow_name || 'Planner summary'}
-        subtitle={autoPlan?.goal_type ? `Goal type: ${autoPlan.goal_type}` : 'Orchestrator summary'}
-        width="max-w-3xl"
-      >
-        <div className="p-6 space-y-5 bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.1),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
-          <div className="flex items-center gap-2">
+      {showPlanModal && !!autoPlan && (
+        <aside className={`fixed right-0 top-0 z-40 flex h-screen flex-col border-l border-white/10 bg-[#05070b]/95 shadow-[0_0_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[width] duration-200 ${planPanelCollapsed ? 'w-[72px]' : 'w-[min(760px,calc(100vw-24px))]'}`}>
+          <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+            <button
+              type="button"
+              onClick={() => setPlanPanelCollapsed((value) => !value)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-muted hover:text-ink"
+              title={planPanelCollapsed ? 'Expand plan' : 'Collapse plan'}
+            >
+              {planPanelCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+            </button>
+            {!planPanelCollapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-ink">{plannerNameDraft || autoPlan?.workflow_name || 'Planner summary'}</div>
+                <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted">{autoPlan?.goal_type ? `Goal type: ${autoPlan.goal_type}` : 'Enterprise architecture response'}</div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowPlanModal(false)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-muted hover:text-ink"
+              title="Close plan"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          {!planPanelCollapsed && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-[radial-gradient(circle_at_top,rgba(92,225,230,0.1),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={acceptPlanner} disabled={!autoPlan?.ready || constructingCanvas} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">Accept</button>
             <button onClick={() => setPlannerEditMode((prev) => !prev)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm hover:border-accent/40">{plannerEditMode ? 'Close edit' : 'Edit'}</button>
             <button onClick={replanPlanner} disabled={autoBuilding} className="inline-flex items-center justify-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm text-accent hover:bg-accent/15">Replan</button>
             <button onClick={rejectPlanner} className="inline-flex items-center justify-center gap-2 rounded-xl border border-bad/30 bg-bad/10 px-4 py-2.5 text-sm text-bad hover:bg-bad/15">Reject</button>
           </div>
+          {autoPlan?.missing_templates?.length > 0 && (
+            <div className="rounded-3xl border border-cyan-300/25 bg-cyan-300/10 p-5">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">Approval needed now</div>
+              <div className="mt-2 text-lg font-semibold text-ink">Install exact-match marketplace seed agents</div>
+              <div className="mt-2 text-sm leading-6 text-muted">The orchestrator found marketplace agents that match required workflow roles. Install them here, then it will rebuild once and show the full architecture response.</div>
+            </div>
+          )}
+          {!(autoPlan?.missing_templates || []).length && (
+            <>
           {plannerEditMode && (
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-[#0a1020]/70 p-4">
               <div>
@@ -723,21 +978,84 @@ export default function WorkflowBuilderPage() {
               </div>
             </div>
           )}
-          {autoPlan?.executive_summary && <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">{autoPlan.executive_summary}</div>}
-          {autoPlan?.reasoning_summary && <div className="rounded-2xl border border-white/10 bg-[#0a1020]/70 p-4 text-sm text-muted">{autoPlan.reasoning_summary}</div>}
-          {autoPlan?.architecture_summary && (
+          {(autoPlan?.clarifying_questions || []).length > 0 && (
+            <div className="rounded-2xl border border-accent/20 bg-accent/10 p-4">
+              <div className="text-[11px] uppercase tracking-widest text-accent mb-3">Planner questions</div>
+              <div className="space-y-3">
+                {autoPlan.clarifying_questions.map((question, idx) => (
+                  <label key={`${question}-${idx}`} className="block">
+                    <span className="text-[12px] text-ink">{question}</span>
+                    <input
+                      value={plannerQuestionAnswers[question] || ''}
+                      onChange={(event) => setPlannerQuestionAnswers((prev) => ({ ...prev, [question]: event.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-accent/40"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {autoPlan?.enterprise_report && Object.keys(autoPlan.enterprise_report).length > 0 && (
+            <div className="rounded-3xl border border-accent/20 bg-[linear-gradient(135deg,rgba(92,225,230,0.12),rgba(124,92,255,0.08)),rgba(255,255,255,0.035)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-accent">Enterprise research brief</div>
+                  <div className="mt-1 text-lg font-semibold text-ink">Market, architecture, objectives, and risk view</div>
+                </div>
+                {autoPlan.market_signal?.demand_signal && (
+                  <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs text-accent">Demand: {autoPlan.market_signal.demand_signal}</span>
+                )}
+              </div>
+              {autoPlan.enterprise_report.design_document_markdown && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-[#070b13]/80 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted">
+                    <FileText size={13} className="text-accent" />
+                    Technical design document preview
+                  </div>
+                  <MarkdownReport markdown={autoPlan.enterprise_report.design_document_markdown} />
+                </div>
+              )}
+              {!hasDesignDocument && <div className="mt-4 grid gap-3">
+                {['usecase_understanding', 'market_evaluation', 'market_comparison', 'technical_architecture'].map((key) => (
+                  autoPlan.enterprise_report[key] && (
+                    <div key={key} className="rounded-2xl border border-white/10 bg-[#070b13]/70 p-4">
+                      <div className="text-[10px] uppercase tracking-widest text-muted">{key.replaceAll('_', ' ')}</div>
+                      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-[#dbe6f7]">{autoPlan.enterprise_report[key]}</div>
+                    </div>
+                  )
+                ))}
+              </div>}
+              {!hasDesignDocument && <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {['pros', 'cons', 'key_objectives', 'key_identifiers', 'key_differentiators', 'tech_stack', 'agent_blueprint', 'tools_required', 'protocols_and_cloud'].map((key) => (
+                  (autoPlan.enterprise_report[key] || []).length > 0 && (
+                    <div key={key} className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                      <div className="text-[10px] uppercase tracking-widest text-muted">{key.replaceAll('_', ' ')}</div>
+                      <div className="mt-2 space-y-2">
+                        {autoPlan.enterprise_report[key].map((item, idx) => (
+                          <div key={`${key}-${idx}`} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[12px] leading-5 text-muted">{item}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>}
+            </div>
+          )}
+          {!hasDesignDocument && autoPlan?.executive_summary && <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">{autoPlan.executive_summary}</div>}
+          {!hasDesignDocument && autoPlan?.reasoning_summary && <div className="rounded-2xl border border-white/10 bg-[#0a1020]/70 p-4 text-sm text-muted">{autoPlan.reasoning_summary}</div>}
+          {!hasDesignDocument && autoPlan?.architecture_summary && (
             <div className="rounded-2xl border border-accent/20 bg-accent/10 p-4">
               <div className="text-[11px] uppercase tracking-widest text-accent mb-2">Suggested architecture</div>
               <div className="text-sm text-ink">{autoPlan.architecture_summary}</div>
             </div>
           )}
-          {autoPlan?.orchestrator_prompt && (
+          {!hasDesignDocument && autoPlan?.orchestrator_prompt && (
             <div className="rounded-2xl border border-white/10 bg-[#0a1020]/70 p-4">
               <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Reusable orchestrator prompt</div>
               <pre className="whitespace-pre-wrap text-[12px] leading-6 text-[#dbe6f7]">{autoPlan.orchestrator_prompt}</pre>
             </div>
           )}
-          {autoPlan?.market_signal && (
+          {!hasDesignDocument && autoPlan?.market_signal && (
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-[11px] uppercase tracking-widest text-muted mb-2">Market readiness signal</div>
               <div className="text-sm text-ink">Demand signal: <span className="font-medium">{autoPlan.market_signal.demand_signal}</span></div>
@@ -814,6 +1132,8 @@ export default function WorkflowBuilderPage() {
               </button>
             </div>
           )}
+            </>
+          )}
           {autoPlan?.missing_templates?.length > 0 && (
             <div className="space-y-3">
               <div className="text-[11px] uppercase tracking-widest text-warn">Install required agents</div>
@@ -826,27 +1146,29 @@ export default function WorkflowBuilderPage() {
                   <div className="text-[12px] text-muted">{item.description}</div>
                 </div>
               ))}
-              <button onClick={() => buildFromPrompt(true)} disabled={installingMissing} className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent hover:bg-accent/15 disabled:opacity-50">
-                <Sparkles size={14} /> {installingMissing ? 'Installing and rebuilding...' : 'Install required agents and build workflow'}
+              <button onClick={() => buildFromPrompt(true, plannerPromptDraft || autoPrompt || workflowInput)} disabled={installingMissing} className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent hover:bg-accent/15 disabled:opacity-50">
+                <Sparkles size={14} /> {installingMissing ? 'Installing and rebuilding...' : 'Install exact-match agents and build workflow'}
               </button>
             </div>
           )}
-          {autoPlan?.citations?.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-[11px] uppercase tracking-widest text-muted">Planner citations</div>
-              {autoPlan.citations.map((item, idx) => (
-                <div key={`${item.source_type}-${item.source_ref}-${idx}`} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <div className="text-sm font-medium text-ink">
-                    {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-accent hover:underline">{item.label}</a> : item.label}
-                  </div>
-                  <div className="mt-1 text-[12px] text-muted">{item.excerpt || item.source_ref}</div>
-                  <div className="mt-1 text-[11px] text-accent">{item.source_type} {item.source_ref ? `| ${item.source_ref}` : ''}</div>
-                </div>
-              ))}
             </div>
           )}
+        </aside>
+      )}
+      {runningWorkflow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#030712]/55 backdrop-blur-sm">
+          <div className="w-[min(420px,calc(100vw-2rem))] rounded-3xl border border-cyan-300/20 bg-[#05070b]/90 p-6 text-center shadow-[0_28px_120px_rgba(0,0,0,0.45)]">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10">
+              <LoaderCircle size={20} className="animate-spin text-cyan-200" />
+            </div>
+            <div className="mt-4 font-display text-xl text-ink">Starting workflow run</div>
+            <div className="mt-2 text-sm leading-6 text-muted">Packaging inputs, validating agents, and opening the live execution console.</div>
+            <div className="mt-5 h-1 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full w-1/2 animate-[shimmer_1.1s_ease-in-out_infinite] rounded-full bg-cyan-300" />
+            </div>
+          </div>
         </div>
-      </ModalShell>
+      )}
     </div>
   )
 }

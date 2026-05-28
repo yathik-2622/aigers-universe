@@ -22,6 +22,7 @@ import AdminPage from './pages/AdminPage.jsx'
 import WorkflowBuilderPage from './pages/WorkflowBuilderPage.jsx'
 import WorkflowRunPage from './pages/WorkflowRunPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+import SignupPage from './pages/SignupPage.jsx'
 
 function ProtectedShell() {
   const { ready, user } = useAuth()
@@ -68,6 +69,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
         <Route path="/*" element={<ProtectedShell />} />
       </Routes>
       <Toaster

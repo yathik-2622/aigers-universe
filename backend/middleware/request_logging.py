@@ -23,6 +23,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
         start_time = time.perf_counter()
 
         structlog.contextvars.clear_contextvars()

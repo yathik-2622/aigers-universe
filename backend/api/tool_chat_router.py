@@ -136,10 +136,14 @@ def _truncate_text(value: str, limit: int = 280) -> str:
 
 def _log_step(logs: list[dict], label: str, detail: str, status: str = "completed") -> None:
     logs.append({
+        "type": "status_update",
+        "channel": "aiger_copilot",
         "step_id": str(uuid.uuid4()),
         "label": label,
+        "stage": label,
         "detail": detail,
         "status": status,
+        "tone": "error" if status == "failed" else ("warn" if status in {"warning", "fallback"} else "info"),
         "timestamp": _utcnow(),
     })
 
@@ -431,6 +435,37 @@ def _extract_citations_from_tool_results(tool_results: list[dict]) -> list[dict]
     return citations[:12]
 
 
+async def _general_web_research(user_id: str, query: str, logs: list[dict]) -> tuple[list[str], list[dict], list[dict]]:
+    tool_results: list[dict] = []
+    for tool_name, args in [
+        ("official_docs_search", {"provider": "all", "query": query[:220], "max_results": 3}),
+        ("wikipedia_search", {"query": query[:180], "limit": 2}),
+        ("serpapi_search", {"query": query[:220], "num": 4}),
+    ]:
+        result = await _invoke_chat_tool(tool_name, args, user_id=user_id, session_id="general_research")
+        if isinstance(result, dict) and result.get("error"):
+            continue
+        tool_results.append({"tool": tool_name, "args": args, "result": result})
+    citations = _extract_citations_from_tool_results(tool_results)
+    sections: list[str] = []
+    for item in tool_results:
+        result = item.get("result") or {}
+        entries = result.get("results") or result.get("matches") or []
+        if entries:
+            sections.append(
+                f"{item['tool'].upper()}:\n" + "\n\n".join(
+                    f"[{entry.get('title') or entry.get('name') or item['tool']}]\n{entry.get('snippet') or entry.get('excerpt') or entry.get('description') or entry.get('url') or ''}"
+                    for entry in entries[:5]
+                    if isinstance(entry, dict)
+                )
+            )
+    if citations:
+        _log_step(logs, "Research web", f"Prepared {len(citations)} web/official-doc citation(s) for general reasoning.")
+    else:
+        _log_step(logs, "Research web", "Attempted web and official-doc research, but no citeable public results were returned.", "warning")
+    return sections, citations, tool_results
+
+
 async def _build_platform_context(user_id: str, session: dict) -> str:
     db = get_db()
     installed_agents = await db.agents.find(
@@ -517,6 +552,12 @@ async def _build_grounding_payload(*, user_id: str, session: dict, user_message:
             payload["citations"].extend(attachment_citations)
             _log_step(logs, "Load attachments", f"Prepared {len(attachment_sections)} attached source documents for grounding.")
 
+    if mode == GENERAL_MODE:
+        web_sections, web_citations, web_tool_results = await _general_web_research(user_id, user_message, logs)
+        payload["context_sections"].extend(web_sections)
+        payload["citations"].extend(web_citations)
+        payload["retrieval_summary"] = {"mode": "web_first_general", "web_citations": len(web_citations), "tools": [item["tool"] for item in web_tool_results]}
+
     platform_docs = rank_platform_documents(user_message, _platform_doc_records(), top_k=5)
     if platform_docs:
         payload["context_sections"].append(
@@ -528,7 +569,7 @@ async def _build_grounding_payload(*, user_id: str, session: dict, user_message:
         payload["citations"].extend([_platform_doc_citation(doc, user_message) for doc in platform_docs])
         _log_step(logs, "Refresh platform docs", f"Loaded {len(platform_docs)} live markdown/html sources from the repository.")
 
-    include_kb = mode in {KNOWLEDGE_MODE, GENERAL_MODE}
+    include_kb = mode == KNOWLEDGE_MODE
     if include_kb:
         kb_result = await retrieve_knowledge_chunks(
             user_id=user_id,
@@ -605,13 +646,15 @@ async def _generate_follow_up_questions(
 def _system_prompt_for_mode(mode: str) -> str:
     if mode == PLATFORM_MODE:
         return (
-            "You are AIger Copilot inside the AIger's Universe platform. "
-            "Primary job: explain this exact platform, its architecture, agents, workflows, tools, A2A, KB, HITL, projects, reports, and operating patterns. "
-            "When the user describes a use case, map it to the platform using installed agents first, then marketplace templates, tools, workflow steps, inputs, HITL points, and expected outputs. "
-            "Be explicit about what exists now versus what would still need implementation. "
-            "Use provided grounded sources heavily. Do not invent capabilities that are not in the context. "
-            "If MCP tools or installed agents would improve the answer, call them. "
-            "If the user asks something far outside the grounded platform sources, politely refuse and say the request is outside the current grounded AIger sources."
+            "You are AIger Copilot, a senior enterprise architect and platform guide inside AIger's Universe. "
+            "Produce useful, decision-grade answers, not short generic summaries. "
+            "For platform questions, explain the exact current architecture, agents, workflows, tools, A2A, KB, HITL, projects, reports, and operating patterns using the provided sources. "
+            "For a use case, deliver a practical enterprise response with these sections when relevant: objective, current platform fit, recommended workflow, agents/tools, required inputs, HITL approvals, risks, implementation steps, and expected outputs. "
+            "Use installed agents first, then marketplace templates, then clearly label gaps. "
+            "Be explicit about what exists now versus what still needs implementation. "
+            "Use citations like [1] when grounded evidence exists. "
+            "If evidence is weak, state that limitation and ask focused follow-up questions instead of guessing. "
+            "If MCP tools or installed agents materially improve accuracy, call them."
         )
     if mode == KNOWLEDGE_MODE:
         return (
@@ -620,8 +663,11 @@ def _system_prompt_for_mode(mode: str) -> str:
             "Do not answer from general world knowledge."
         )
     return (
-        "You are AIger General Chat. Stay grounded to the provided workspace sources, attachments, and retrieved knowledge. "
-        "If the question requires facts that are not supported by the grounded sources, politely refuse instead of guessing. "
+        "You are AIger General Chat, optimized for grounded technical depth. "
+        "Answer with enough detail to be actionable: summarize, analyze tradeoffs, recommend next steps, and include examples when useful. "
+        "Prefer current web, official documentation, Wikipedia, and attached-file citations over knowledge-base citations. "
+        "Do not use private KB evidence in general mode unless the user explicitly attaches it to this chat. "
+        "If the question requires unsupported facts, say what is missing and ask for the needed source instead of guessing. "
         "Use tools when they materially improve accuracy, and do not claim live external freshness unless a web-capable tool was actually used."
     )
 
@@ -645,7 +691,9 @@ def _prepare_conversation_messages(session: dict, user_message: str, grounded_co
             "role": "system",
             "content": (
                 "Use concise inline citations that match the provided source list, for example [1] or [2]. "
-                "If the evidence is insufficient, respond with a brief refusal rather than speculating.\n\n"
+                "Prefer complete, well-structured answers over minimal replies. "
+                "Do not expose hidden chain-of-thought; show concise operational rationale and evidence. "
+                "If the evidence is insufficient, explain what is missing and ask focused follow-up questions rather than speculating.\n\n"
                 f"SOURCE LIST:\n{citation_guide or '[1] No grounded source available'}"
             ),
         },
@@ -709,9 +757,11 @@ async def _run_chat_completion(
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments or "{}")
             _log_step(processing_logs, "Run tool", f"{tc.function.name} called with structured arguments.")
+            processing_logs[-1].update({"label": tc.function.name, "stage": "Tool call", "tone": "tool", "payload": {"tool": tc.function.name, "args": args}})
             result = await _invoke_chat_tool(tc.function.name, args, user_id=user_id, session_id=session["session_id"])
             if isinstance(result, dict) and result.get("error"):
                 _log_step(processing_logs, "Tool fallback", f"{tc.function.name} failed safely: {result['error']}")
+                processing_logs[-1].update({"label": tc.function.name, "stage": "Tool fallback", "tone": "warn", "payload": {"tool": tc.function.name, "error": result.get("error")}})
             tool_results.append({"tool": tc.function.name, "args": args, "result": result})
             assistant_tool_calls.append(
                 {
@@ -943,7 +993,7 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
         assistant_message_id = str(uuid.uuid4())
         processing_logs: list[dict] = []
 
-        yield _sse_event("assistant_start", {"message_id": assistant_message_id, "mode": mode, "model_name": model_name})
+        yield _sse_event("assistant_start", {"type": "status_update", "channel": "aiger_copilot", "message_id": assistant_message_id, "mode": mode, "model_name": model_name, "label": "Assistant started", "detail": "Opened a streamed response session."})
 
         _log_step(processing_logs, "Load memory", "Loaded session history and conversation context.")
         yield _sse_event("log", processing_logs[-1])
@@ -985,6 +1035,8 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
                 enabled_tools=enabled_tools,
             )
             yield _sse_event("final", {
+                "type": "final",
+                "channel": "aiger_copilot",
                 "message_id": assistant_message_id,
                 "reply": final_content,
                 "tool_results": [],
@@ -1029,13 +1081,15 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments or "{}")
                 _log_step(processing_logs, "Run tool", f"{tc.function.name} called with structured arguments.")
+                processing_logs[-1].update({"label": tc.function.name, "stage": "Tool call", "tone": "tool", "payload": {"tool": tc.function.name, "args": args}})
                 yield _sse_event("log", processing_logs[-1])
                 result = await _invoke_chat_tool(tc.function.name, args, user_id=user_id, session_id=session["session_id"])
                 if isinstance(result, dict) and result.get("error"):
                     _log_step(processing_logs, "Tool fallback", f"{tc.function.name} failed safely: {result['error']}")
+                    processing_logs[-1].update({"label": tc.function.name, "stage": "Tool fallback", "tone": "warn", "payload": {"tool": tc.function.name, "error": result.get("error")}})
                     yield _sse_event("log", processing_logs[-1])
                 tool_results.append({"tool": tc.function.name, "args": args, "result": result})
-                yield _sse_event("tool", {"tool": tc.function.name, "args": args, "result": result})
+                yield _sse_event("tool", {"type": "tool_call", "channel": "aiger_copilot", "tool": tc.function.name, "args": args, "result": result})
                 assistant_tool_calls.append(
                     {
                         "id": tc.id,
@@ -1050,13 +1104,13 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
             yield _sse_event("log", processing_logs[-1])
             async for delta, collected in _stream_llm_content(followup_messages, model_name, user_id):
                 final_content = collected
-                yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
+                yield _sse_event("content_delta", {"type": "content", "channel": "aiger_copilot", "message_id": assistant_message_id, "delta": delta, "content": collected})
         else:
             _log_step(processing_logs, "Synthesize answer", "Streaming response from conversation memory and grounded context.")
             yield _sse_event("log", processing_logs[-1])
             async for delta, collected in _stream_llm_content(messages, model_name, user_id):
                 final_content = collected
-                yield _sse_event("content_delta", {"message_id": assistant_message_id, "delta": delta, "content": collected})
+                yield _sse_event("content_delta", {"type": "content", "channel": "aiger_copilot", "message_id": assistant_message_id, "delta": delta, "content": collected})
 
         citations = _dedupe_citations(base_citations + _extract_citations_from_tool_results(tool_results))
         follow_up_questions = await _generate_follow_up_questions(
@@ -1090,6 +1144,8 @@ async def stream_session_message(session_id: str, request: Request, body: ChatMe
         yield _sse_event(
             "final",
             {
+                "type": "final",
+                "channel": "aiger_copilot",
                 "message_id": assistant_message_id,
                 "reply": final_content,
                 "tool_results": tool_results,

@@ -26,6 +26,7 @@ PREFERRED_TEXT_KEYS = (
     "description",
     "result",
 )
+NOISE_OUTPUT_KEYS = {"approved", "note", "citations", "pii_findings", "redlines"}
 
 
 def _line_map(text: str) -> list[dict]:
@@ -94,6 +95,133 @@ def _extract_primary_text(value) -> str:
     return ""
 
 
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else ([] if value in (None, "") else [value])
+
+
+def _humanize_key(value: str) -> str:
+    return re.sub(r"[_\-]+", " ", str(value or "")).strip().title()
+
+
+def _format_structured_value(value, indent: int = 0) -> list[str]:
+    prefix = "  " * indent
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            if key in NOISE_OUTPUT_KEYS and not item:
+                continue
+            label = _humanize_key(key)
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}- **{label}:**")
+                lines.extend(_format_structured_value(item, indent + 1))
+            else:
+                lines.append(f"{prefix}- **{label}:** {item}")
+        return lines
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict):
+                lines.extend(_format_structured_value(item, indent))
+            else:
+                lines.append(f"{prefix}- {item}")
+        return lines
+    return [f"{prefix}- {value}"]
+
+
+def _format_dict_table(items: list[dict], preferred_keys: list[str]) -> list[str]:
+    rows = [item for item in items if isinstance(item, dict)]
+    if not rows:
+        return []
+    keys = [key for key in preferred_keys if any(row.get(key) not in (None, "", []) for row in rows)]
+    if not keys:
+        keys = list(rows[0].keys())[:4]
+    lines = [
+        "| " + " | ".join(_humanize_key(key) for key in keys) + " |",
+        "| " + " | ".join("---" for _ in keys) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_excerpt(str(row.get(key, "-")), 260).replace("|", "/") for key in keys) + " |")
+    return lines
+
+
+def _format_agent_output_markdown(agent_name: str, output) -> list[str]:
+    if not isinstance(output, dict):
+        return _format_structured_value(output)
+    lines: list[str] = []
+    scalar_items = []
+    for key, value in output.items():
+        if key in NOISE_OUTPUT_KEYS and not value:
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        scalar_items.append((key, value))
+    if scalar_items:
+        lines.extend(["| Field | Value |", "|---|---|"])
+        for key, value in scalar_items:
+            lines.append(f"| {_humanize_key(key)} | {_excerpt(str(value), 420).replace('|', '/')} |")
+    table_preferences = {
+        "violations": ["severity", "issue", "rule_name", "reason", "remediation", "recommendation"],
+        "redlines": ["original", "replacement", "reason"],
+        "recommended_fixes": ["issue", "recommendation"],
+        "recommendations": ["priority", "action", "rationale"],
+        "key_clauses": ["title", "description", "content"],
+        "entities": ["name", "role", "type", "value"],
+        "dates": ["type", "value"],
+        "amounts": ["type", "value"],
+    }
+    for key, preferred in table_preferences.items():
+        value = output.get(key)
+        if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+            lines.extend(["", f"#### {_humanize_key(key)}"])
+            lines.extend(_format_dict_table(value, preferred))
+    for key, value in output.items():
+        if key in table_preferences or key in NOISE_OUTPUT_KEYS or not isinstance(value, list):
+            continue
+        if value and all(not isinstance(item, dict) for item in value):
+            lines.extend(["", f"#### {_humanize_key(key)}"])
+            lines.extend(f"- {item}" for item in value)
+    if not lines:
+        lines.extend(_format_structured_value(output))
+    return lines
+
+
+def _build_outcome_markdown(final_output: dict) -> list[str]:
+    summary = final_output.get("summary") or final_output.get("executive_summary") or final_output.get("result") or ""
+    recommendation = final_output.get("overall_recommendation") or final_output.get("approval_recommendation") or final_output.get("decision") or ""
+    lines = []
+    if summary:
+        lines.extend(["## Outcome Summary", str(summary)])
+    if recommendation:
+        lines.extend(["", "## Decision", f"**{str(recommendation).upper()}**"])
+    actions = final_output.get("recommendations") or final_output.get("recommended_fixes") or final_output.get("mitigations") or []
+    if actions:
+        lines.extend(["", "## Priority Actions"])
+        table_rows = []
+        for item in _as_list(actions):
+            if isinstance(item, dict):
+                priority = item.get("priority") or item.get("severity") or "ACTION"
+                action = item.get("action") or item.get("recommendation") or item.get("issue") or item.get("title") or "Recommended action"
+                rationale = item.get("rationale") or item.get("reason") or ""
+                table_rows.append((priority, action, rationale))
+            else:
+                table_rows.append(("ACTION", str(item), ""))
+        if table_rows:
+            lines.extend(["| Priority | Action | Rationale |", "|---|---|---|"])
+            for priority, action, rationale in table_rows:
+                lines.append(f"| {priority} | {action} | {rationale or '-'} |")
+    brief = final_output.get("executive_brief") or final_output.get("key_findings") or final_output.get("key_risks") or []
+    if brief:
+        lines.extend(["", "## Key Findings"])
+        lines.extend(f"- {item}" for item in _as_list(brief))
+    if not lines:
+        primary_text = _extract_primary_text(final_output)
+        if primary_text:
+            lines.extend(["## Outcome", primary_text])
+        else:
+            lines.extend(["## Outcome", "The workflow completed. Review structured results below."])
+    return lines
+
+
 async def _resolve_last_agent_context(run: dict) -> dict:
     agents = run.get("agents") or []
     if not agents:
@@ -143,30 +271,21 @@ def _build_domain_markdown(run: dict, last_agent: dict, final_output: dict) -> s
     title = run.get("workflow_name") or "Workflow Report"
     status = (run.get("status") or "unknown").upper()
     agent_name = last_agent.get("agent_name") or "Final agent"
-    system_prompt = (last_agent.get("system_prompt") or "").strip()
-    primary_text = _extract_primary_text(final_output)
 
     lines = [f"# {title}", "", f"**Status:** {status}", f"**Final agent:** {agent_name}"]
     if run.get("failure_reason"):
         lines.append(f"**Failure reason:** {run['failure_reason']}")
-    if system_prompt:
-        lines.extend(["", "## Final Agent Objective", _excerpt(system_prompt, 1400)])
 
-    if primary_text:
-        lines.extend(["", "## Final Deliverable"])
-        if _is_probably_markdown(primary_text):
-            lines.append(primary_text)
-        else:
-            lines.extend([primary_text, ""])
-
-    lines.extend(["", "## Final Output JSON", "```json", json.dumps(final_output or {}, indent=2, default=str), "```"])
+    lines.extend(["", *_build_outcome_markdown(final_output)])
+    lines.extend(["", "## Structured Result", "```json", json.dumps(final_output or {}, indent=2, default=str), "```"])
     outputs = run.get("outputs_by_agent") or {}
     if outputs:
-        lines.extend(["", "## Upstream Agent Outputs"])
+        lines.extend(["", "## Agent Evidence Trail"])
         for agent, output in outputs.items():
             if agent == agent_name:
                 continue
-            lines.extend([f"### {agent}", "```json", json.dumps(output, indent=2, default=str), "```"])
+            lines.append(f"### {agent}")
+            lines.extend(_format_agent_output_markdown(agent, output))
     return "\n".join(lines).strip()
 
 
@@ -218,7 +337,8 @@ async def build_run_report(run: dict) -> dict:
             "label": doc.get("filename", "knowledge-base document"),
             "excerpt": _excerpt((doc.get("text") or ""), 240),
             "source_type": "knowledge_base_document",
-            "source_ref": doc.get("filename", ""),
+            "source_ref": doc.get("document_id", ""),
+            "content_url": f"/api/documents/{doc.get('document_id')}/content",
         })
     for item in workflow_inputs.get("uploaded_files") or []:
         if (item.get("text_excerpt") or "").strip():
@@ -227,6 +347,7 @@ async def build_run_report(run: dict) -> dict:
                 "excerpt": _excerpt(item.get("text_excerpt", ""), 240),
                 "source_type": "workflow_input",
                 "source_ref": item.get("document_id", ""),
+                "content_url": f"/api/documents/{item.get('document_id')}/content" if item.get("document_id") else "",
             })
 
     return {

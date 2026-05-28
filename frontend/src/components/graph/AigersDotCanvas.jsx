@@ -54,6 +54,7 @@ export default function HCKBDotCanvas({
   const neonColorForLink = (link, highlighted = false) => {
     const semantic = (link.edge_type || "") === "semantic";
     if (highlighted) return semantic ? 0x67e8f9 : 0xfacc15;
+    if (link.color) return new THREE.Color(link.color).getHex();
     if (semantic) {
       const score = Math.max(0, Math.min(1, Number(link.similarity ?? 0)));
       const hue = 185 + Math.round(score * 110);
@@ -897,6 +898,7 @@ export default function HCKBDotCanvas({
         transparent: true,
         opacity: selectedNodeId ? (highlighted ? (semantic ? 0.98 : 0.8) : 0.06) : (semantic ? 0.48 : 0.24),
         blending: THREE.AdditiveBlending,
+        linewidth: Math.max(1, Number(link.stroke_width || (semantic ? 3 : 2))),
       });
       material.toneMapped = false;
       const line = new THREE.Line(geometry, material);

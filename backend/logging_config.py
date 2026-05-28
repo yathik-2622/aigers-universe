@@ -15,11 +15,11 @@ def configure_logging() -> None:
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.format_exc_info,
         structlog.processors.StackInfoRenderer(),
     ]
 
     if settings.LOG_JSON_FORMAT:
+        shared_processors.append(structlog.processors.format_exc_info)
         renderer = structlog.processors.JSONRenderer()
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=True)

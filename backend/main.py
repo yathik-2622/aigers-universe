@@ -29,6 +29,7 @@ from api.tool_chat_router import router as tool_chat_router
 from api.a2a_router import router as a2a_router
 from api.settings_router import router as settings_router
 from api.knowledge_graph_router import router as knowledge_graph_router
+from core.api_errors import public_error, request_id_from
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -71,8 +72,13 @@ app.add_middleware(RequestLoggingMiddleware)
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.error("unhandled_exception", path=str(request.url), error=str(exc), exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    request_id = request_id_from(request)
+    logger.error("unhandled_exception", path=str(request.url), error=str(exc), request_id=request_id, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": public_error("Internal server error", "INTERNAL_SERVER_ERROR", request_id)},
+        headers={"X-Request-ID": request_id} if request_id else None,
+    )
 
 
 # ── API routes — ALL prefixed with /api to satisfy Kubernetes ingress routing ──

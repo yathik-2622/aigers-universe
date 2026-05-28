@@ -3,6 +3,7 @@ import { Save, ShieldCheck, Wrench, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { listModels, listTools, updateAgent } from '../../api/platform.js'
 import { validateRemoteCard } from '../../api/a2a.js'
+import { apiErrorMessage } from '../../api/client.js'
 import CustomSelect from '../common/CustomSelect.jsx'
 import { normalizeModelOptions } from '../../lib/modelOptions.js'
 
@@ -31,8 +32,8 @@ export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) 
   const [remoteCardSummary, setRemoteCardSummary] = useState(null)
 
   useEffect(() => {
-    listTools().then(d => setTools(d.tools || [])).catch(() => {})
-    listModels().then(d => setModels(normalizeModelOptions(d.models || []))).catch(() => {})
+    listTools().then(d => setTools(d.tools || [])).catch((err) => toast.error(apiErrorMessage(err, 'Failed to load tools')))
+    listModels().then(d => setModels(normalizeModelOptions(d.models || []))).catch((err) => toast.error(apiErrorMessage(err, 'Failed to load models')))
   }, [])
   useEffect(() => {
     if (!node) return
@@ -103,8 +104,8 @@ export default function AgentConfigPanel({ node, onClose, onUpdate, onRemove }) 
         input_bindings: form.input_bindings,
       })
       toast.success('Agent updated')
-    } catch {
-      toast.error('Failed to update agent')
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update agent'))
     } finally { setSaving(false) }
   }
 
