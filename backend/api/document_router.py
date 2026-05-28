@@ -359,6 +359,7 @@ async def _store_document_text(
         payload["ingested_at"] = _utcnow()
 
     await db[AIGERS_DOCUMENTS].insert_one(payload)
+    payload.pop("_id", None)
     return payload
 
 

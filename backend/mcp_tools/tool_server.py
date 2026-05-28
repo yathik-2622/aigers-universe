@@ -178,13 +178,22 @@ async def document_store_impl(action: str, collection: str, data: dict | None = 
     if normalized_action == "insert":
         normalized_action = "store"
 
+    collection = (collection or "").strip() or ("documents" if normalized_action == "retrieve" else "agent_notes")
     logger.info("tool.document_store.called", action=normalized_action, collection=collection)
     db = get_db()
     normalized_collection = (collection or "").strip().lower()
     if normalized_collection in {"documents", "workspace_documents", "uploaded_documents"}:
         if normalized_action != "retrieve":
             raise ValueError("Documents collection supports retrieve action only")
-        docs = await db[AIGERS_DOCUMENTS].find(query or {}, {"_id": 0}).limit(limit).to_list(limit)
+        doc_query = query or {}
+        if isinstance(doc_query.get("text"), str):
+            doc_query = {
+                "$or": [
+                    {"filename": {"$regex": re.escape(doc_query["text"]), "$options": "i"}},
+                    {"context_excerpt": {"$regex": re.escape(doc_query["text"]), "$options": "i"}},
+                ]
+            }
+        docs = await db[AIGERS_DOCUMENTS].find(doc_query, {"_id": 0}).limit(limit).to_list(limit)
         return {"success": True, "data": docs, "count": len(docs), "collection": AIGERS_DOCUMENTS}
 
     safe_collection = f"agent_data_{collection}"
@@ -436,9 +445,22 @@ async def serpapi_search_impl(query: str, num: int = 5, location: str | None = N
 async def webpage_fetch_impl(url: str, max_chars: int = 5000) -> dict:
     """Fetch a web page and return a cleaned text excerpt."""
     async with httpx.AsyncClient(timeout=float(settings.WEBPAGE_FETCH_TIMEOUT_SECONDS), follow_redirects=True) as client:
-        response = await client.get(url, headers={"User-Agent": "AIGERS-Universe/1.0"})
-        response.raise_for_status()
-        html = response.text
+        try:
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; AIGERS-Universe/1.0; +https://localhost)",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+            )
+            response.raise_for_status()
+            html = response.text
+        except httpx.HTTPStatusError as exc:
+            logger.warning("tool.webpage_fetch.http_failed", url=url, status_code=exc.response.status_code)
+            return {"url": url, "error": f"HTTP {exc.response.status_code}", "content": "", "content_length": 0}
+        except Exception as exc:
+            logger.warning("tool.webpage_fetch.failed", url=url, error=str(exc))
+            return {"url": url, "error": str(exc), "content": "", "content_length": 0}
     cleaned = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
     cleaned = re.sub(r"<[^>]+>", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()

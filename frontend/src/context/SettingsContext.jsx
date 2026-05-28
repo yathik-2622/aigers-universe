@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { getSettings, updateSettings as updateSettingsApi } from '../api/settings.js'
+import { apiErrorMessage } from '../api/client.js'
 import { useAuth } from './AuthContext.jsx'
 
 const SettingsContext = createContext(null)
@@ -57,7 +59,7 @@ export function SettingsProvider({ children }) {
         if (!mounted) return
         setSettings((prev) => ({ ...prev, ...DEFAULT_SETTINGS, ...(data.settings || {}) }))
       })
-      .catch(() => {})
+      .catch((err) => toast.error(apiErrorMessage(err, 'Failed to load settings')))
       .finally(() => {
         if (mounted) setLoading(false)
       })

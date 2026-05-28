@@ -133,26 +133,45 @@ def _coerce_tool_input(tool_name: str, kwargs: dict) -> dict:
     action = normalized.get("action")
     collection = normalized.get("collection")
     query = dict(normalized.get("query") or {})
+    loose_query = normalized.get("q") or normalized.get("search") or normalized.get("query_text")
+    data = normalized.get("data")
 
     if document_id:
         query.setdefault("document_id", document_id)
+    if loose_query and not query:
+        query = {"text": str(loose_query)}
 
+    if action == "store" and not data and query:
+        action = "retrieve"
     if not action:
         action = "retrieve" if query else "store"
 
-    if not collection and (document_id or action == "retrieve"):
+    if not collection and (document_id or action == "retrieve" or query):
         collection = "documents"
+    if not collection:
+        collection = "agent_notes"
 
     coerced = dict(normalized)
     coerced["action"] = action
-    if collection:
-        coerced["collection"] = collection
+    coerced["collection"] = collection
     if query:
         coerced["query"] = query
     if action == "retrieve":
         coerced.setdefault("limit", 1 if document_id else 50)
     coerced.pop("document_id", None)
+    coerced.pop("q", None)
+    coerced.pop("search", None)
+    coerced.pop("query_text", None)
     return coerced
+
+
+async def _invoke_base_tool_json(base_tool, tool_name: str, kwargs: dict) -> str:
+    try:
+        result = await base_tool.ainvoke(_coerce_tool_input(tool_name, kwargs))
+        return result if isinstance(result, str) else json.dumps(result, default=str)
+    except Exception as exc:
+        logger.warning("agent.tool.failed_safely", tool=tool_name, error=str(exc))
+        return json.dumps({"error": str(exc), "tool": tool_name, "status": "failed_safely"}, default=str)
 
 
 def _make_crewai_tool(base_tool, tool):
@@ -161,8 +180,7 @@ def _make_crewai_tool(base_tool, tool):
 
     async def _wrapped_tool(**kwargs):
         """CrewAI tool wrapper."""
-        result = await base_tool.ainvoke(_coerce_tool_input(name, kwargs))
-        return result if isinstance(result, str) else json.dumps(result, default=str)
+        return await _invoke_base_tool_json(base_tool, name, kwargs)
 
     _wrapped_tool.__doc__ = description
     _wrapped_tool.__name__ = _safe_message_name(name)
@@ -186,14 +204,13 @@ def _make_agno_tool(base_tool, tool):
     name = base_tool.name
     description = base_tool.description or name
 
-    @tool
     async def _wrapped_tool(**kwargs):
-        result = await base_tool.ainvoke(_coerce_tool_input(name, kwargs))
-        return result if isinstance(result, str) else json.dumps(result, default=str)
+        return await _invoke_base_tool_json(base_tool, name, kwargs)
 
     _wrapped_tool.__name__ = name
+    _wrapped_tool.__qualname__ = name
     _wrapped_tool.__doc__ = description
-    return _wrapped_tool
+    return tool(_wrapped_tool)
 
 
 def _compose_user_message(input_data: dict, upstream_messages: list[dict] | None, selected_policy_ids: list[str]) -> str:
@@ -241,6 +258,22 @@ def _compose_user_message(input_data: dict, upstream_messages: list[dict] | None
             )
         )
 
+    kb_documents = workflow_inputs.get("knowledge_base_documents") or []
+    for index, item in enumerate(kb_documents, start=1):
+        excerpt = (item.get("text_excerpt") or "").strip()
+        if not excerpt:
+            continue
+        user_parts.append(
+            "\n".join(
+                [
+                    f"SELECTED KNOWLEDGE BASE DOCUMENT {index}: {item.get('filename', 'document')}",
+                    f"Category: {item.get('category', 'general')}",
+                    f"Document ID: {item.get('document_id', '')}",
+                    excerpt[:12000],
+                ]
+            )
+        )
+
     if input_data.get("previous_outputs"):
         user_parts.append(f"PREVIOUS OUTPUTS:\n{json.dumps(input_data.get('previous_outputs'), default=str)[:12000]}")
 
@@ -254,7 +287,12 @@ def _compose_user_message(input_data: dict, upstream_messages: list[dict] | None
         user_parts.append(
             f"\nSELECTED POLICY IDS:\n{json.dumps(selected_policy_ids)}\nUse these policies when performing compliance or redline work."
         )
-    if original_input.get("document_id") and original_input.get("kb_mode") != "disabled":
+    kb_document_ids = original_input.get("kb_document_ids") or workflow_inputs.get("kb_document_ids") or []
+    if kb_document_ids and original_input.get("kb_mode") != "disabled":
+        user_parts.append(
+            f"\nKNOWLEDGE BASE SCOPE:\nUse only these selected KB document IDs when grounding with KB tools: {json.dumps(kb_document_ids)}."
+        )
+    elif original_input.get("document_id") and original_input.get("kb_mode") != "disabled":
         user_parts.append(
             f"\nKNOWLEDGE BASE DOCUMENT:\nDocument ID {original_input.get('document_id')} | Filename: {original_input.get('filename', '')}\n"
             "Use the knowledge-base and semantic-search tools to ground your answer when needed."
@@ -337,89 +375,85 @@ def _build_langchain_tools(
 ) -> list[StructuredTool]:
     tools: list[StructuredTool] = []
 
-    async def semantic_search(query: str, top_k: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["semantic_search"](query=query, top_k=top_k), default=str)
+    async def _safe_registry_call(tool_name: str, **kwargs) -> str:
+        try:
+            return json.dumps(await TOOL_REGISTRY[tool_name](**kwargs), default=str)
+        except Exception as exc:
+            logger.warning("agent.langchain_tool.failed_safely", tool=tool_name, agent_name=agent_name, error=str(exc))
+            return json.dumps({"error": str(exc), "tool": tool_name, "status": "failed_safely"}, default=str)
 
-    async def document_store(action: str, collection: str, data: dict | None = None, query: dict | None = None, limit: int = 50) -> str:
-        return json.dumps(
-            await TOOL_REGISTRY["document_store"](action=action, collection=collection, data=data, query=query, limit=limit),
-            default=str,
-        )
+    async def semantic_search(query: str, top_k: int = 5) -> str:
+        return await _safe_registry_call("semantic_search", query=query, top_k=top_k)
+
+    async def document_store(action: str = "retrieve", collection: str = "", data: dict | None = None, query: dict | None = None, limit: int = 50) -> str:
+        coerced = _coerce_tool_input("document_store", {"action": action, "collection": collection, "data": data, "query": query, "limit": limit})
+        return await _safe_registry_call("document_store", **coerced)
 
     async def rules_engine_check(text: str, rule_category: str | None = None, policy_ids: list[str] | None = None) -> str:
-        return json.dumps(
-            await TOOL_REGISTRY["rules_engine_check"](
-                text=text,
-                rule_category=rule_category,
-                policy_ids=policy_ids or selected_policy_ids or None,
-            ),
-            default=str,
+        return await _safe_registry_call(
+            "rules_engine_check",
+            text=text,
+            rule_category=rule_category,
+            policy_ids=policy_ids or selected_policy_ids or None,
         )
 
     async def risk_scorer(text: str, context: str = "") -> str:
-        return json.dumps(await TOOL_REGISTRY["risk_scorer"](text=text, context=context), default=str)
+        return await _safe_registry_call("risk_scorer", text=text, context=context)
 
     async def policy_library_search(query: str, policy_ids: list[str] | None = None, limit: int = 5) -> str:
-        return json.dumps(
-            await TOOL_REGISTRY["policy_library_search"](query=query, policy_ids=policy_ids or selected_policy_ids or None, limit=limit),
-            default=str,
-        )
+        return await _safe_registry_call("policy_library_search", query=query, policy_ids=policy_ids or selected_policy_ids or None, limit=limit)
 
     async def wikipedia_search(query: str, limit: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["wikipedia_search"](query=query, limit=limit), default=str)
+        return await _safe_registry_call("wikipedia_search", query=query, limit=limit)
 
     async def webpage_fetch(url: str, max_chars: int = 5000) -> str:
-        return json.dumps(await TOOL_REGISTRY["webpage_fetch"](url=url, max_chars=max_chars), default=str)
+        return await _safe_registry_call("webpage_fetch", url=url, max_chars=max_chars)
 
     async def weather_current(latitude: float, longitude: float, timezone: str = "auto") -> str:
-        return json.dumps(await TOOL_REGISTRY["weather_current"](latitude=latitude, longitude=longitude, timezone=timezone), default=str)
+        return await _safe_registry_call("weather_current", latitude=latitude, longitude=longitude, timezone=timezone)
 
     async def openweather_current(latitude: float, longitude: float, units: str = "metric") -> str:
-        return json.dumps(await TOOL_REGISTRY["openweather_current"](latitude=latitude, longitude=longitude, units=units), default=str)
+        return await _safe_registry_call("openweather_current", latitude=latitude, longitude=longitude, units=units)
 
     async def serpapi_search(query: str, num: int = 5, location: str | None = None) -> str:
-        return json.dumps(await TOOL_REGISTRY["serpapi_search"](query=query, num=num, location=location), default=str)
+        return await _safe_registry_call("serpapi_search", query=query, num=num, location=location)
 
     async def official_docs_search(query: str, provider: str = "all", max_results: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["official_docs_search"](provider=provider, query=query, max_results=max_results), default=str)
+        return await _safe_registry_call("official_docs_search", provider=provider, query=query, max_results=max_results)
 
     async def java_docs_search(query: str, max_results: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["java_docs_search"](query=query, max_results=max_results), default=str)
+        return await _safe_registry_call("java_docs_search", query=query, max_results=max_results)
 
     async def python_docs_search(query: str, max_results: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["python_docs_search"](query=query, max_results=max_results), default=str)
+        return await _safe_registry_call("python_docs_search", query=query, max_results=max_results)
 
     async def spring_docs_search(query: str, max_results: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["spring_docs_search"](query=query, max_results=max_results), default=str)
+        return await _safe_registry_call("spring_docs_search", query=query, max_results=max_results)
 
     async def dotnet_docs_search(query: str, max_results: int = 5) -> str:
-        return json.dumps(await TOOL_REGISTRY["dotnet_docs_search"](query=query, max_results=max_results), default=str)
+        return await _safe_registry_call("dotnet_docs_search", query=query, max_results=max_results)
 
     async def remote_agent_discover(agent_card_url: str) -> str:
-        return json.dumps(await TOOL_REGISTRY["remote_agent_discover"](agent_card_url=agent_card_url), default=str)
+        return await _safe_registry_call("remote_agent_discover", agent_card_url=agent_card_url)
 
     async def remote_agent_dispatch(agent_card_url: str, input_data: dict, message_type: str = "delegation") -> str:
-        return json.dumps(
-            await TOOL_REGISTRY["remote_agent_dispatch"](
-                agent_card_url=agent_card_url,
-                input_data=input_data,
-                workflow_run_id=workflow_run_id,
-                from_agent=agent_name,
-                message_type=message_type,
-            ),
-            default=str,
+        return await _safe_registry_call(
+            "remote_agent_dispatch",
+            agent_card_url=agent_card_url,
+            input_data=input_data,
+            workflow_run_id=workflow_run_id,
+            from_agent=agent_name,
+            message_type=message_type,
         )
 
     async def trigger_hitl(reason: str, severity: str, context: dict | None = None) -> str:
-        return json.dumps(
-            await TOOL_REGISTRY["trigger_hitl"](
-                workflow_run_id=workflow_run_id,
-                agent_name=agent_name,
-                reason=reason,
-                severity=severity,
-                context=context or {},
-            ),
-            default=str,
+        return await _safe_registry_call(
+            "trigger_hitl",
+            workflow_run_id=workflow_run_id,
+            agent_name=agent_name,
+            reason=reason,
+            severity=severity,
+            context=context or {},
         )
 
     available = {

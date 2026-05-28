@@ -68,12 +68,15 @@ export async function streamChatMessage(id, body, handlers = {}) {
     for (const chunk of chunks) {
       const lines = chunk.split('\n').filter(Boolean)
       const eventLine = lines.find((line) => line.startsWith('event: '))
-      const dataLine = lines.find((line) => line.startsWith('data: '))
-      if (!eventLine || !dataLine) continue
+      const dataLines = lines.filter((line) => line.startsWith('data: '))
+      if (!eventLine || !dataLines.length) continue
       const eventName = eventLine.replace('event: ', '').trim()
+      const rawData = dataLines.map((line) => line.replace('data: ', '')).join('\n')
       try {
-        emit(eventName, JSON.parse(dataLine.replace('data: ', '')))
-      } catch {}
+        emit(eventName, JSON.parse(rawData))
+      } catch {
+        emit(eventName, { type: eventName, detail: rawData })
+      }
     }
   }
 }

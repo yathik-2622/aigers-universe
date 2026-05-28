@@ -194,3 +194,47 @@ body {
 .s-paused { color: #f59e0b; }
 .s-failed { color: #ef4444; }
 .s-pending { color: #7c7c95; }
+
+/* Prism syntax palette shared by chat, reports, A2A payloads, and docs */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: #d7e2f3;
+  text-shadow: none;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  tab-size: 2;
+  hyphens: none;
+}
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata { color: #70809a; }
+.token.punctuation { color: #93a4bd; }
+.token.property,
+.token.tag,
+.token.constant,
+.token.symbol,
+.token.deleted { color: #ff7b72; }
+.token.boolean,
+.token.number { color: #79c0ff; }
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted { color: #7ee787; }
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string { color: #d2a8ff; }
+.token.atrule,
+.token.attr-value,
+.token.keyword { color: #ff7bcb; }
+.token.function,
+.token.class-name { color: #d2a8ff; }
+.token.regex,
+.token.important,
+.token.variable { color: #ffa657; }

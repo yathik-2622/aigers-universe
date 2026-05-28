@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from core.llm_router import chat_completion
+from core.api_errors import public_error, request_id_from
 from core.report_builder import build_run_report
 from db.mongo_client import get_db
 from core.request_context import get_optional_role, get_optional_user_id
@@ -38,6 +39,8 @@ def _report_needs_rematerialization(run: dict) -> bool:
     markdown = (run.get("report_markdown") or "").strip()
     structured = run.get("report_structured") or {}
     if not markdown:
+        return True
+    if "## Final Agent Objective" in markdown or "## Final Deliverable" in markdown or "## Upstream Agent Outputs" in markdown:
         return True
     if structured.get("primary_agent"):
         return False
@@ -215,6 +218,77 @@ class AutoBuildWorkflowRequest(BaseModel):
     auto_install_missing: bool = Field(default=False)
 
 
+def _json_default(value):
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=_json_default)}\n\n"
+
+
+def _orchestrator_event(stage: str, detail: str, status: str = "completed", tone: str = "info", payload: dict | None = None) -> dict:
+    return {
+        "type": "status_update",
+        "channel": "workflow_orchestrator",
+        "stage": stage,
+        "label": stage,
+        "detail": detail,
+        "status": status,
+        "tone": tone,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "payload": payload or None,
+    }
+
+
+def _preflight_clarifying_questions(prompt: str) -> list[str]:
+    normalized = _normalized(prompt)
+    if "clarifications" in normalized or "answer" in normalized:
+        return []
+    tokens = normalized.split()
+    broad_terms = {"app", "platform", "system", "workflow", "solution", "project", "tool", "agent", "automation"}
+    needs_more_context = len(tokens) < 22 or len(set(tokens) - broad_terms) < 8
+    if not needs_more_context:
+        return []
+    return [
+        "Who is the primary user or business team for this workflow?",
+        "What source material should the agents trust first: uploaded files, knowledge base, repository, or web research?",
+        "What final deliverable do you expect: architecture report, implementation plan, data extraction, market analysis, or executable workflow run?",
+    ]
+
+
+async def _llm_clarifying_questions(prompt: str) -> list[str]:
+    fallback = _preflight_clarifying_questions(prompt)
+    if not fallback:
+        return []
+    try:
+        result = await chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an enterprise workflow intake architect. "
+                        "Return strict JSON: {\"questions\": [str]}. "
+                        "Ask 2-4 concise, prompt-specific questions needed before designing a workflow. "
+                        "Questions must be tailored to the actual use case, not generic fixed intake questions. "
+                        "Do not ask questions already answered in the prompt."
+                    ),
+                },
+                {"role": "user", "content": prompt[:4000]},
+            ],
+            caller="workflow.auto_build.clarifying_questions",
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        payload = json.loads(result.get("content") or "{}")
+        questions = [str(item).strip() for item in payload.get("questions", []) if str(item).strip()]
+        return questions[:4] or fallback
+    except Exception as exc:
+        logger.warning("api.workflow.auto_build.clarifying_questions_failed", error=str(exc))
+        return fallback
+
+
 def _normalized(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
@@ -370,37 +444,6 @@ async def _run_market_research(prompt: str) -> dict:
             logger.warning("api.workflow.auto_build.market_tool_failed", tool=tool_name, error=str(exc))
             return None
 
-    serp_result = await _try_tool(
-        "serpapi_search",
-        query=f"{prompt[:180]} market size adoption roi enterprise",
-        num=5,
-        location="United States",
-    )
-    if serp_result:
-        for item in (serp_result.get("results") or [])[:3]:
-            title = item.get("title") or item.get("source") or "Market result"
-            snippet = item.get("snippet") or ""
-            link = item.get("link") or ""
-            if not snippet:
-                continue
-            findings.append({"title": title, "summary": _clip_text(snippet), "source_type": "web_search", "url": link})
-            citations.append(_coerce_market_citation(title, "web_search", link or title, snippet, link))
-            source_count += 1
-            if link:
-                page = await _try_tool("webpage_fetch", url=link, max_chars=2400)
-                page_content = (page or {}).get("content") or ""
-                if page_content:
-                    findings.append({
-                        "title": f"{title} detail",
-                        "summary": _clip_text(page_content, 420),
-                        "source_type": "webpage_fetch",
-                        "url": link,
-                    })
-                    citations.append(_coerce_market_citation(f"{title} detail", "webpage_fetch", link, page_content, link))
-                    source_count += 1
-            if source_count >= 4:
-                break
-
     wiki_result = await _try_tool("wikipedia_search", query=prompt[:160], limit=2)
     if wiki_result:
         for item in (wiki_result.get("results") or [])[:2]:
@@ -424,6 +467,38 @@ async def _run_market_research(prompt: str) -> dict:
             findings.append({"title": title, "summary": _clip_text(snippet), "source_type": "official_docs", "url": url})
             citations.append(_coerce_market_citation(title, "official_docs", url or title, snippet, url))
             source_count += 1
+
+    if source_count < 4:
+        serp_result = await _try_tool(
+            "serpapi_search",
+            query=f"{prompt[:180]} market size adoption roi enterprise",
+            num=5,
+            location="United States",
+        )
+        if serp_result:
+            for item in (serp_result.get("results") or [])[:3]:
+                title = item.get("title") or item.get("source") or "Market result"
+                snippet = item.get("snippet") or ""
+                link = item.get("link") or ""
+                if not snippet:
+                    continue
+                findings.append({"title": title, "summary": _clip_text(snippet), "source_type": "web_search", "url": link})
+                citations.append(_coerce_market_citation(title, "web_search", link or title, snippet, link))
+                source_count += 1
+                if link:
+                    page = await _try_tool("webpage_fetch", url=link, max_chars=2400)
+                    page_content = (page or {}).get("content") or ""
+                    if page_content:
+                        findings.append({
+                            "title": f"{title} detail",
+                            "summary": _clip_text(page_content, 420),
+                            "source_type": "webpage_fetch",
+                            "url": link,
+                        })
+                        citations.append(_coerce_market_citation(f"{title} detail", "webpage_fetch", link, page_content, link))
+                        source_count += 1
+                if source_count >= 4:
+                    break
 
     findings = findings[:6]
     citations = citations[:8]
@@ -543,14 +618,113 @@ def _build_architecture_summary(prompt: str, selected_agents: list[dict], creati
     )
 
 
+def _build_design_document_markdown(
+    prompt: str,
+    enterprise_report: dict,
+    selected_agents: list[dict],
+    missing_templates: list[dict],
+    creation_suggestions: list[dict],
+    market_signal: dict,
+    citations: list[dict],
+) -> str:
+    report = enterprise_report or {}
+    agent_lines = []
+    for index, agent in enumerate(selected_agents, start=1):
+        agent_lines.append(
+            f"{index}. **{agent.get('name', 'Agent')}** ({agent.get('framework', 'langgraph')}) - "
+            f"{agent.get('description') or 'Executes its assigned workflow capability.'}"
+        )
+    for suggestion in creation_suggestions:
+        agent_lines.append(
+            f"{len(agent_lines) + 1}. **{suggestion.get('name', 'Custom agent')}** ({suggestion.get('framework', 'langgraph')}) - "
+            f"{suggestion.get('description') or suggestion.get('rationale') or 'Custom capability generated for this use case.'}"
+        )
+    if not agent_lines and missing_templates:
+        for template in missing_templates:
+            agent_lines.append(
+                f"{len(agent_lines) + 1}. **{template.get('name', 'Marketplace agent')}** ({template.get('framework', 'langgraph')}) - "
+                f"{template.get('description') or 'Marketplace capability pending installation.'}"
+            )
+
+    citation_lines = []
+    for index, citation in enumerate(citations[:8], start=1):
+        label = citation.get("label") or citation.get("source_ref") or f"Source {index}"
+        url = citation.get("url") or ""
+        if url and citation.get("source_type") in {"web_search", "webpage_fetch", "official_docs", "wikipedia"}:
+            citation_lines.append(f"- [{label}]({url})")
+
+    return "\n".join(
+        [
+            f"# {report.get('title') or 'Enterprise Solution Design'}",
+            "",
+            "## 1. Use Case Understanding",
+            report.get("usecase_understanding") or prompt.strip(),
+            "",
+            "## 2. Market Validation",
+            report.get("market_evaluation") or market_signal.get("evidence_note") or "Market validation requires live research citations before production investment decisions.",
+            "\n".join(citation_lines) if citation_lines else "- No live market citations were available during this run.",
+            "",
+            "## 3. Market Differentiation",
+            report.get("market_comparison") or "The use case should differentiate through workflow specificity, governed agent orchestration, evidence-backed outputs, and HITL controls.",
+            "",
+            "## 4. Key Differentiators",
+            "\n".join(f"- {item}" for item in (report.get("key_differentiators") or ["Grounded enterprise workflow design", "Marketplace-aware agent composition", "Human approval gates for risk and installation"])) ,
+            "",
+            "## 5. Target Architecture",
+            report.get("technical_architecture") or "Prompt intake -> clarification -> market validation -> agent/workflow planning -> HITL installation gate -> canvas generation -> governed execution.",
+            "",
+            "## 6. Agent Workflow Plan",
+            "\n".join(agent_lines) or "- Custom architecture and orchestration agents should be created for this workflow.",
+            "",
+            "## 7. Tools, Protocols, And Cloud",
+            "\n".join(f"- {item}" for item in (report.get("tools_required") or report.get("protocols_and_cloud") or ["Knowledge base search", "Document store", "Marketplace template registry", "HITL approval service", "A2A handoffs"])) ,
+            "",
+            "## 8. Implementation Notes",
+            report.get("design_document") or "Build the workflow as a governed AIger canvas with explicit input bindings, scoped tools, reusable prompts, and audit-ready citations.",
+        ]
+    )
+
+
+def _ensure_enterprise_report(
+    prompt: str,
+    plan: dict,
+    selected_agents: list[dict],
+    missing_templates: list[dict],
+    creation_suggestions: list[dict],
+    market_signal: dict,
+    citations: list[dict],
+) -> dict:
+    report = dict(plan.get("enterprise_report") or {})
+    report.setdefault("usecase_understanding", plan.get("workflow_description") or prompt.strip())
+    report.setdefault("market_evaluation", market_signal.get("evidence_note") or _default_market_signal(prompt).get("evidence_note"))
+    report.setdefault("market_comparison", "Compared the requested workflow against available market signals, installed inventory, and marketplace seed agents to identify exact-fit and gap capabilities.")
+    report.setdefault("pros", ["Can be converted into a governed multi-agent workflow", "Supports market-backed validation and reusable technical documentation"])
+    report.setdefault("cons", ["Requires human confirmation when the prompt lacks business context", "Live market evidence depends on configured research tools"])
+    report.setdefault("key_objectives", ["Understand the user intent", "Validate market relevance", "Design the target architecture", "Build an executable AIger workflow"])
+    report.setdefault("key_identifiers", [_infer_goal_type(prompt), "enterprise-workflow", "agentic-orchestration"])
+    report.setdefault("key_differentiators", ["Clarification-first architecture planning", "Marketplace exact-match install gate", "Automatic custom agent creation when no exact seed agent exists"])
+    report.setdefault("technical_architecture", plan.get("architecture_summary") or _build_architecture_summary(prompt, selected_agents, creation_suggestions))
+    report.setdefault("tech_stack", ["AIger workflow builder", "LangGraph/LangChain/CrewAI/Agno agents", "MongoDB-backed registry", "SSE orchestration stream"])
+    report.setdefault("agent_blueprint", [agent.get("name") for agent in selected_agents if agent.get("name")] + [item.get("name") for item in creation_suggestions if item.get("name")])
+    report.setdefault("tools_required", sorted({tool for agent in selected_agents for tool in (agent.get("tools") or [])} | {tool for item in creation_suggestions for tool in (item.get("tools") or [])}))
+    report.setdefault("protocols_and_cloud", ["HTTP APIs", "Server-sent events", "A2A local handoffs", "HITL approval workflow"])
+    report["design_document_markdown"] = _build_design_document_markdown(prompt, report, selected_agents, missing_templates, creation_suggestions, market_signal, citations)
+    return report
+
+
 async def _llm_auto_plan(prompt: str, installed_agents: list[dict], templates: list[dict]) -> dict:
     messages = [
         {
             "role": "system",
             "content": (
-                "You are the AIger's Universe workflow orchestration planner. "
-                "Select the smallest high-signal multi-agent workflow for the user's prompt. "
-                "Prefer already installed agents when they fit. Use marketplace templates only when an installed agent is missing. "
+                "You are the AIger's Universe LangGraph-style workflow orchestration planner. "
+                "Act as a best-in-class 30+ year senior enterprise solution architect, technical architect, product strategist, and agentic workflow designer. "
+                "Follow this exact sequence: understand the user prompt; ask only necessary clarifying questions; validate the use case against the market with citations when tools provide them; identify market differentiators; create full technical design documentation in Markdown; plan the AIger workflow with agent count, agent roles, prompts, tools, frameworks, inputs, outputs, and HITL gates; then map that design to installed agents and marketplace seed agents. "
+                "Do not merely pick agents. First understand the use case, then design the POC independently of current platform inventory, then map that design onto installed agents and marketplace templates. "
+                "Ask clarifying questions only when essential information is missing. If clarifications are present, incorporate them and continue. "
+                "Evaluate market fit, cite evidence when available, identify pros, cons, risks, differentiators, business objectives, technical objectives, architecture, tech stack, cloud/protocol/tool choices, and the agents required to build the POC. "
+                "Only after that, compare installed agents and marketplace templates for exact role/prompt fit. Prefer installed agents only when their description and intended prompt match the role. Use marketplace templates when a matching installed agent is absent. Suggest custom agent creation when neither fits. "
+                "For every custom agent suggestion, create a production-grade system_prompt that is specific to the user's use case, includes inputs, tools, output contract, grounding rules, and HITL behavior. "
                 "Return strict JSON with this schema: "
                 "{\"workflow_name\": str, \"workflow_description\": str, \"goal_type\": str, "
                 "\"reasoning_summary\": str, \"executive_summary\": str, \"architecture_summary\": str, "
@@ -561,8 +735,11 @@ async def _llm_auto_plan(prompt: str, installed_agents: list[dict], templates: l
                 "\"include_github_repo\": bool, \"include_knowledge_base\": bool, \"include_upstream_outputs\": bool}}], "
                 "\"workflow_input_hints\": {\"needs_text\": bool, \"needs_files\": bool, \"needs_repo_import\": bool, \"needs_kb\": bool}, "
                 "\"hitl_checkpoints\": [{\"stage\": str, \"label\": str, \"detail\": str}], "
+                "\"clarifying_questions\": [str], "
+                "\"enterprise_report\": {\"usecase_understanding\": str, \"market_evaluation\": str, \"market_comparison\": str, \"pros\": [str], \"cons\": [str], \"key_objectives\": [str], \"key_identifiers\": [str], \"key_differentiators\": [str], \"design_document\": str, \"design_document_markdown\": str, \"technical_architecture\": str, \"tech_stack\": [str], \"agent_blueprint\": [str], \"tools_required\": [str], \"protocols_and_cloud\": [str]}, "
                 "\"agent_creation_suggestions\": [{\"name\": str, \"framework\": str, \"model_name\": str, \"tools\": [str], \"description\": str, \"system_prompt\": str, \"rationale\": str, \"hitl_enabled\": bool, \"tags\": [str]}]}. "
-                "Use 2 to 5 steps. Do not invent IDs. Leave irrelevant id fields as empty strings."
+                "Use 2 to 6 workflow steps. Do not invent installed agent IDs or template IDs. Leave irrelevant id fields as empty strings. "
+                "Do not expose hidden chain-of-thought; provide concise operational reasoning summaries and evidence-backed recommendations."
             ),
         },
         {
@@ -590,6 +767,13 @@ def _coerce_input_bindings(bindings: dict | None) -> dict:
 
 
 async def _install_template_for_user(template: dict, user_id: str | None) -> dict:
+    db = get_db()
+    existing_query = {"template_id": template["template_id"], "status": "active"}
+    if user_id:
+        existing_query["owner_user_id"] = user_id
+    existing = await db.agents.find_one(existing_query, {"_id": 0})
+    if existing:
+        return existing
     agent_data = {
         "name": template["name"],
         "framework": template["framework"],
@@ -604,6 +788,26 @@ async def _install_template_for_user(template: dict, user_id: str | None) -> dic
         "remote_agent_card_url": "",
         "template_id": template["template_id"],
         "owner_user_id": user_id,
+    }
+    agent_id = await agent_repo.create(agent_data)
+    return {"agent_id": agent_id, **agent_data, "status": "active"}
+
+
+async def _create_custom_agent_for_user(suggestion: dict, user_id: str | None) -> dict:
+    agent_data = {
+        "name": suggestion.get("name") or "Custom Orchestrator Agent",
+        "framework": suggestion.get("framework") or "langgraph",
+        "description": suggestion.get("description") or suggestion.get("rationale") or "",
+        "system_prompt": suggestion.get("system_prompt") or suggestion.get("rationale") or "Custom AIger orchestrator agent.",
+        "model_name": suggestion.get("model_name") or "gpt-4o",
+        "tools": suggestion.get("tools") or [],
+        "hitl_enabled": bool(suggestion.get("hitl_enabled")),
+        "tags": suggestion.get("tags") or [],
+        "a2a_enabled": True,
+        "a2a_mode": "local",
+        "remote_agent_card_url": "",
+        "owner_user_id": user_id,
+        "generated_by": "workflow_orchestrator",
     }
     agent_id = await agent_repo.create(agent_data)
     return {"agent_id": agent_id, **agent_data, "status": "active"}
@@ -765,6 +969,18 @@ async def _resolve_auto_plan(
 
     goal_type = plan.get("goal_type") or _infer_goal_type(prompt)
     creation_suggestions = plan.get("agent_creation_suggestions") or _build_creation_suggestions(prompt, goal_type, missing_templates, selected_agents)
+    auto_created_agents: list[dict] = []
+    if creation_suggestions and not missing_templates:
+        for suggestion in creation_suggestions[: max(0, 4 - len(selected_agents))]:
+            created = await _create_custom_agent_for_user(suggestion, user_id)
+            auto_created_agents.append({"agent_id": created["agent_id"], "name": created["name"], "framework": created.get("framework", "langgraph")})
+            step_map[created["agent_id"]] = {
+                "label": suggestion.get("name") or created["name"],
+                "why": suggestion.get("rationale") or suggestion.get("description") or "Custom generated for uncovered use-case capability.",
+                "input_bindings": dict(DEFAULT_INPUT_BINDINGS),
+            }
+            selected_agents.append(created)
+        creation_suggestions = []
     hitl_checkpoints = plan.get("hitl_checkpoints") or _build_hitl_checkpoints(plan, missing_templates, creation_suggestions)
     architecture_summary = plan.get("architecture_summary") or _build_architecture_summary(prompt, selected_agents, creation_suggestions)
     market_signal = await _run_market_research(prompt)
@@ -785,6 +1001,23 @@ async def _resolve_auto_plan(
 
     workflow_id = str(uuid.uuid4())
     nodes, edges = _build_canvas_nodes(selected_agents, step_map, workflow_id)
+    enterprise_report = _ensure_enterprise_report(
+        prompt,
+        plan,
+        selected_agents,
+        missing_templates,
+        creation_suggestions,
+        market_signal,
+        citations,
+    )
+    orchestrator_events = [
+        {"tone": "accent", "label": "Reasoning", "text": "Understood the use case and classified the workflow goal."},
+        {"tone": "info", "label": "Extracting", "text": f"Compared {len(installed_agents)} installed agent(s) with {len(templates)} marketplace template(s)."},
+        {"tone": "info", "label": "Planning agents", "text": f"Selected {len(selected_agents)} installed or newly installed agent(s)."},
+        {"tone": "warn" if missing_templates else "ok", "label": "Checking marketplace", "text": f"Exact-match marketplace installs needed: {len(missing_templates)}."},
+        {"tone": "accent" if market_signal.get("live") else "warn", "label": "Researching market", "text": market_signal.get("evidence_note", "")},
+        {"tone": "ok", "label": "Designing workflow", "text": f"Prepared {len(hitl_checkpoints)} human approval checkpoint(s)."},
+    ]
     return {
         "workflow_id": workflow_id,
         "workflow_name": plan.get("workflow_name") or "Auto-built workflow",
@@ -803,10 +1036,14 @@ async def _resolve_auto_plan(
         "selected_agent_ids": [agent["agent_id"] for agent in selected_agents],
         "missing_templates": missing_templates,
         "installed_now": installed_now,
+        "auto_created_agents": auto_created_agents,
         "workflow_input_hints": plan.get("workflow_input_hints") or {},
         "hitl_checkpoints": hitl_checkpoints,
+        "clarifying_questions": (plan.get("clarifying_questions") or [])[:5],
+        "enterprise_report": enterprise_report,
         "agent_creation_suggestions": creation_suggestions,
         "citations": citations,
+        "orchestrator_events": orchestrator_events,
         "market_signal": market_signal,
         "market_research": market_signal.get("findings") or [],
         "ready": len(selected_agents) >= 2 and not missing_templates,
@@ -878,6 +1115,96 @@ async def auto_build_workflow(request: Request, body: AutoBuildWorkflowRequest):
         installed_now=len(plan["installed_now"]),
     )
     return plan
+
+
+@router.post("/auto-build/stream")
+async def stream_auto_build_workflow(request: Request, body: AutoBuildWorkflowRequest):
+    async def event_generator():
+        db = get_db()
+        user_id = get_optional_user_id(request)
+        prompt = body.prompt.strip()
+        yield _sse_event("status_update", _orchestrator_event("Orchestrator started", "Opened a streamed planning session for this workflow.", "running", "accent"))
+
+        clarifying_questions = await _llm_clarifying_questions(prompt)
+        if clarifying_questions:
+            payload = {
+                "type": "requires_input",
+                "channel": "workflow_orchestrator",
+                "stage": "Clarify requirements",
+                "label": "Clarify requirements",
+                "detail": "The request is still broad, so workflow assembly is paused until these answers are provided.",
+                "tone": "warn",
+                "questions": clarifying_questions,
+                "partial_plan": {
+                    "workflow_id": str(uuid.uuid4()),
+                    "workflow_name": "Clarification needed",
+                    "workflow_description": prompt,
+                    "goal_type": _infer_goal_type(prompt),
+                    "ready": False,
+                    "clarifying_questions": clarifying_questions,
+                    "nodes": [],
+                    "edges": [],
+                    "selected_agent_ids": [],
+                    "missing_templates": [],
+                    "installed_now": [],
+                    "workflow_input_hints": {"needs_text": True, "needs_files": True, "needs_repo_import": False, "needs_kb": True},
+                    "hitl_checkpoints": [{
+                        "stage": "clarification",
+                        "label": "Answer planner questions",
+                        "detail": "The orchestrator will continue after these inputs are added.",
+                    }],
+                    "enterprise_report": {},
+                    "agent_creation_suggestions": [],
+                    "citations": [],
+                    "orchestrator_events": [_orchestrator_event("Clarify requirements", "Paused before agent selection to avoid guessing.", "paused", "warn")],
+                    "market_signal": _default_market_signal(prompt),
+                    "market_research": [],
+                },
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+            }
+            yield _sse_event("requires_input", payload)
+            yield _sse_event("end", {"status": "waiting_for_input"})
+            return
+
+        yield _sse_event("status_update", _orchestrator_event("Load inventory", "Loading installed agents and marketplace templates.", "running", "info"))
+        agent_query = {"status": "active"}
+        if user_id:
+            agent_query["owner_user_id"] = user_id
+        installed_agents = await db.agents.find(agent_query, {"_id": 0}).to_list(500)
+        templates = await db.marketplace_templates.find({}, {"_id": 0}).to_list(500)
+        yield _sse_event("status_update", _orchestrator_event("Compare inventory", f"Found {len(installed_agents)} installed agent(s) and {len(templates)} marketplace template(s).", "completed", "info"))
+        if not templates:
+            yield _sse_event("error", {"type": "error", "channel": "workflow_orchestrator", "detail": "Marketplace templates are not available yet"})
+            return
+
+        yield _sse_event("status_update", _orchestrator_event("Plan workflow", "Selecting agents, checking prompt fit, HITL gates, and missing capabilities.", "running", "accent"))
+        try:
+            plan = await _resolve_auto_plan(
+                prompt=prompt,
+                installed_agents=installed_agents,
+                templates=templates,
+                auto_install_missing=body.auto_install_missing,
+                user_id=user_id,
+            )
+        except Exception as exc:
+            logger.error("api.workflow.auto_build.stream_failed", error=str(exc), exc_info=True)
+            yield _sse_event("error", {"type": "error", "channel": "workflow_orchestrator", "detail": str(exc)})
+            return
+
+        for event in plan.get("orchestrator_events") or []:
+            yield _sse_event("status_update", _orchestrator_event(event.get("label") or "Planner event", event.get("text") or event.get("detail") or "Planner event received.", "completed", event.get("tone") or "info"))
+        yield _sse_event("final_plan", {"type": "final_plan", "channel": "workflow_orchestrator", "plan": plan, "timestamp": datetime.datetime.utcnow().isoformat()})
+        yield _sse_event("end", {"status": "completed"})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("")
@@ -956,7 +1283,7 @@ async def run_workflow(workflow_id: str, request: Request, body: RunWorkflowRequ
         return {"run_id": run_id, "status": "running", "warnings": warning_tools}
     except Exception as exc:
         logger.error("api.workflow.run_failed", workflow_id=workflow_id, error=str(exc), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {exc}")
+        raise HTTPException(status_code=500, detail=public_error("Failed to start workflow", "WORKFLOW_START_FAILED", request_id_from(request)))
 
 
 @router.get("/runs/all")
@@ -1068,7 +1395,7 @@ async def resume_run(run_id: str, request: Request):
         return await resume_workflow_run(run_id)
     except Exception as exc:
         logger.error("api.workflow.resume_failed", run_id=run_id, error=str(exc), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to resume workflow: {exc}")
+        raise HTTPException(status_code=500, detail=public_error("Failed to resume workflow", "WORKFLOW_RESUME_FAILED", request_id_from(request)))
 
 
 @router.post("/runs/{run_id}/pause")
@@ -1082,7 +1409,7 @@ async def pause_run(run_id: str, request: Request):
         return await request_workflow_pause(run_id)
     except Exception as exc:
         logger.error("api.workflow.pause_failed", run_id=run_id, error=str(exc), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to request workflow pause: {exc}")
+        raise HTTPException(status_code=500, detail=public_error("Failed to request workflow pause", "WORKFLOW_PAUSE_FAILED", request_id_from(request)))
 
 
 @router.post("/runs/{run_id}/stop")
@@ -1096,7 +1423,7 @@ async def stop_run(run_id: str, request: Request):
         return await request_workflow_stop(run_id)
     except Exception as exc:
         logger.error("api.workflow.stop_failed", run_id=run_id, error=str(exc), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to request workflow stop: {exc}")
+        raise HTTPException(status_code=500, detail=public_error("Failed to request workflow stop", "WORKFLOW_STOP_FAILED", request_id_from(request)))
 
 
 
@@ -1134,6 +1461,17 @@ async def stream_run(run_id: str, request: Request):
             if not sent_snapshot:
                 snapshot = await _attach_run_timing(db, {**run, "a2a_messages": a2a_messages})
                 yield f"event: run_snapshot\ndata: {json.dumps(snapshot, default=str)}\n\n"
+                yield _sse_event("status_update", {
+                    "type": "status_update",
+                    "channel": "workflow_run",
+                    "stage": "Run snapshot",
+                    "label": f"Run {run.get('status', 'unknown')}",
+                    "detail": f"Workflow run snapshot loaded with {len(a2a_messages)} A2A message(s).",
+                    "status": run.get("status"),
+                    "tone": "live" if run.get("status") in {"running", "resuming"} else "info",
+                    "payload": {"run_id": run_id, "current_step": run.get("current_step")},
+                    "timestamp": datetime.datetime.utcnow().isoformat(),
+                })
                 last_run_payload = run_payload
                 last_a2a_ids = current_a2a_ids
                 sent_snapshot = True
@@ -1143,6 +1481,17 @@ async def stream_run(run_id: str, request: Request):
                 if run_payload != last_run_payload:
                     payload = await _attach_run_timing(db, dict(run))
                     yield f"event: run_update\ndata: {json.dumps(payload, default=str)}\n\n"
+                    yield _sse_event("status_update", {
+                        "type": "status_update",
+                        "channel": "workflow_run",
+                        "stage": "Run update",
+                        "label": f"Run {run.get('status', 'unknown')}",
+                        "detail": run.get("failure_reason") or f"Workflow moved to step {run.get('current_step', 'n/a')}.",
+                        "status": run.get("status"),
+                        "tone": "bad" if run.get("status") == "failed" else "ok" if run.get("status") == "completed" else "live",
+                        "payload": {"run_id": run_id, "current_step": run.get("current_step")},
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                    })
                     last_run_payload = run_payload
                     emitted = True
 
@@ -1155,6 +1504,17 @@ async def stream_run(run_id: str, request: Request):
                     new_messages = [msg for msg in a2a_messages if msg.get("message_id", "") not in known]
                     for message in new_messages:
                         yield f"event: a2a_message\ndata: {json.dumps(message, default=str)}\n\n"
+                        yield _sse_event("status_update", {
+                            "type": "status_update",
+                            "channel": "workflow_run",
+                            "stage": "A2A message",
+                            "label": f"{message.get('from_agent', 'Agent')} → {message.get('to_agent', 'Agent')}",
+                            "detail": message.get("message_type") or "A2A handoff",
+                            "status": "completed",
+                            "tone": "tool",
+                            "payload": message.get("payload"),
+                            "timestamp": message.get("timestamp") or datetime.datetime.utcnow().isoformat(),
+                        })
                     last_a2a_ids = current_a2a_ids
                     emitted = emitted or bool(new_messages)
 

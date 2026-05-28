@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
-  Eye,
   FileUp,
   Globe2,
   LoaderCircle,
@@ -25,6 +24,7 @@ import CustomSelect from '../components/common/CustomSelect.jsx'
 import CodeSnippet from '../components/common/CodeSnippet.jsx'
 import MarkdownReport from '../components/common/MarkdownReport.jsx'
 import ModalShell from '../components/common/ModalShell.jsx'
+import ActivityConsole from '../components/common/ActivityConsole.jsx'
 import { listModels, listTools } from '../api/platform.js'
 import {
   createChatSession,
@@ -36,6 +36,7 @@ import {
   updateChatSession,
   uploadChatFiles,
 } from '../api/toolChat.js'
+import { apiErrorMessage } from '../api/client.js'
 import { useSettings } from '../context/SettingsContext.jsx'
 import { normalizeModelOptions } from '../lib/modelOptions.js'
 
@@ -236,57 +237,20 @@ function MessageMeta({ message }) {
   )
 }
 
-function ProcessingPanel({ logs, active = false, onOpenLiveTrace }) {
-  const [open, setOpen] = useState(active)
+function ProcessingPanel({ logs, active = false }) {
   const latestLog = logs?.[logs.length - 1]
-
-  useEffect(() => {
-    if (active) setOpen(true)
-  }, [active])
 
   if (!logs?.length) return null
 
   return (
     <div className="mt-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted transition hover:text-ink"
-        >
-          <LoaderCircle size={13} className={active ? 'animate-spin text-accent' : 'text-accent'} />
-          {active ? 'Reasoning live' : 'Reasoning log'}
-          <ChevronDown size={13} className={`transition ${open ? 'rotate-180' : ''}`} />
-        </button>
-        <button
-          type="button"
-          onClick={onOpenLiveTrace}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-muted transition hover:border-accent/30 hover:text-ink"
-        >
-          <Eye size={12} />
-          Open live trace
-        </button>
-      </div>
-      {open && (
-        <div className="mt-3 space-y-2">
-          {active && latestLog && (
-            <div className="rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-[#d7eff7]">
-              <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-accent">
-                <span className="inline-flex h-2 w-2 rounded-full bg-accent animate-pulse" />
-                Live activity
-              </div>
-              <div className="mt-2 font-medium">{latestLog.label}</div>
-              <div className="mt-1 leading-6 text-[#c0d8e6]">{latestLog.detail}</div>
-            </div>
-          )}
-          {logs.map((log) => (
-            <div key={log.step_id} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{log.label}</div>
-              <div className="mt-1 leading-6">{log.detail}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      <ActivityConsole
+        title={latestLog?.label || (active ? 'Activity live' : 'Activity log')}
+        subtitle={latestLog?.detail || 'Backend retrieval, tool, and response events'}
+        logs={logs}
+        active={active}
+        compact
+      />
     </div>
   )
 }
@@ -294,30 +258,30 @@ function ProcessingPanel({ logs, active = false, onOpenLiveTrace }) {
 function ToolActivity({ items }) {
   if (!items?.length) return null
   return (
-    <div className="mt-4">
-      <details className="group">
-        <summary className="list-none inline-flex cursor-pointer items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted transition hover:text-ink">
+    <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.025] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
           <Wrench size={13} className="text-accent2" />
           Tool activity
-          <ChevronDown size={13} className="transition group-open:rotate-180" />
-        </summary>
-        <div className="mt-3 space-y-2">
-          {items.map((item, index) => (
-            <div key={`${item.tool}-${index}`} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{item.tool}</div>
-              <div className="mt-3 space-y-3">
-                <CodeSnippet code={JSON.stringify(item.args || {}, null, 2)} language="tool args" />
-                <CodeSnippet code={JSON.stringify(item.result || {}, null, 2)} language="tool result" />
-              </div>
-            </div>
-          ))}
         </div>
-      </details>
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{items.length}</span>
+      </div>
+      <div className="mt-3 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+        {items.map((item, index) => (
+          <div key={`${item.tool}-${index}`} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{item.tool}</div>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              <CodeSnippet code={JSON.stringify(item.args || {}, null, 2)} language="tool args" />
+              <CodeSnippet code={JSON.stringify(item.result || {}, null, 2)} language="tool result" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-function AssistantMessage({ message, onCopy, onRegenerate, onOpenCitation, onFollowUp, onOpenReasoning }) {
+function AssistantMessage({ message, onCopy, onRegenerate, onOpenCitation, onFollowUp }) {
   return (
     <div className="mx-auto w-full max-w-4xl py-7">
       <div className="flex items-start gap-4">
@@ -325,7 +289,7 @@ function AssistantMessage({ message, onCopy, onRegenerate, onOpenCitation, onFol
           <Bot size={15} className="text-accent" />
         </div>
         <div className="min-w-0 flex-1">
-          <ProcessingPanel logs={message.processing_logs} active={!!message.streaming} onOpenLiveTrace={() => onOpenReasoning(message.message_id)} />
+          <ProcessingPanel logs={message.processing_logs} active={!!message.streaming} />
           {message.content && (
             <div className="mt-4">
               <div className="mb-3 text-[11px] uppercase tracking-[0.2em] text-muted">Response</div>
@@ -384,7 +348,6 @@ export default function ToolPlaygroundPage() {
   const [activeCitation, setActiveCitation] = useState(null)
   const [activeCitationContent, setActiveCitationContent] = useState(null)
   const [loadingCitationContent, setLoadingCitationContent] = useState(false)
-  const [activeReasoningMessageId, setActiveReasoningMessageId] = useState('')
   const [renamingSessionId, setRenamingSessionId] = useState('')
   const [renameDraft, setRenameDraft] = useState('')
   const [draftMode, setDraftMode] = useState('platform')
@@ -411,7 +374,8 @@ export default function ToolPlaygroundPage() {
       .then((payload) => {
         if (mounted) setActiveCitationContent(payload)
       })
-      .catch(() => {
+      .catch((err) => {
+        toast.error(apiErrorMessage(err, 'Failed to load citation source'))
         if (mounted) setActiveCitationContent(null)
       })
       .finally(() => {
@@ -443,7 +407,9 @@ export default function ToolPlaygroundPage() {
           setDraftTool(detail.session.preferred_tool ?? '')
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        toast.error(apiErrorMessage(err, 'Failed to load chat workspace'))
+      })
       .finally(() => {
         if (mounted) setHydrating(false)
       })
@@ -494,10 +460,6 @@ export default function ToolPlaygroundPage() {
     { value: '', label: 'Auto tool', meta: 'system' },
     ...currentToolNames.map((tool) => ({ value: tool.name, label: tool.name, meta: tool.category || 'tool' })),
   ]), [currentToolNames])
-  const activeReasoningMessage = useMemo(
-    () => (session?.messages || []).find((item) => item.message_id === activeReasoningMessageId) || null,
-    [activeReasoningMessageId, session?.messages],
-  )
   const welcomeCard = useMemo(() => {
     const options = MODE_WELCOME_VARIANTS[currentMode] || MODE_WELCOME_VARIANTS.platform
     return options[stableIndex(`${activeSessionId || currentMode}:${session?.created_at || ''}`, options.length)] || options[0]
@@ -610,7 +572,9 @@ export default function ToolPlaygroundPage() {
       setSession(response.session)
       setDraftTool(response.session.preferred_tool ?? '')
       syncSessionPreview(activeSessionId, response.session)
-    } catch {}
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to save chat settings'))
+    }
   }
 
   const saveRename = async (sessionId) => {
@@ -922,7 +886,6 @@ export default function ToolPlaygroundPage() {
                       onRegenerate={() => regenerateAssistant(message)}
                       onOpenCitation={setActiveCitation}
                       onFollowUp={submit}
-                      onOpenReasoning={setActiveReasoningMessageId}
                     />
                   )
               ))}
@@ -1012,49 +975,6 @@ export default function ToolPlaygroundPage() {
           </div>
         </div>
       </section>
-
-      <ModalShell
-        open={!!activeReasoningMessage}
-        onClose={() => setActiveReasoningMessageId('')}
-        title="Live reasoning trace"
-        subtitle={activeReasoningMessage?.streaming ? 'Streaming step-by-step backend activity' : 'Captured reasoning steps for this response'}
-        width="max-w-3xl"
-      >
-        <div className="bg-elev/70 p-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <MetaTag label="Mode" value={MODES[activeReasoningMessage?.mode]?.label || 'AIger Copilot'} />
-            <MetaTag label="Model" value={activeReasoningMessage?.model_name || 'gpt-4o'} />
-            <MetaTag label="State" value={activeReasoningMessage?.streaming ? 'streaming' : 'complete'} />
-          </div>
-          {activeReasoningMessage?.processing_logs?.length > 0 && (
-            <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 p-4 text-sm text-ink">
-              <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-accent">
-                <span className={`inline-flex h-2 w-2 rounded-full bg-accent ${activeReasoningMessage?.streaming ? 'animate-pulse' : ''}`} />
-                {activeReasoningMessage?.streaming ? 'Live backend activity' : 'Final backend activity'}
-              </div>
-              <div className="mt-2 font-medium">
-                {activeReasoningMessage.processing_logs[activeReasoningMessage.processing_logs.length - 1]?.label}
-              </div>
-              <div className="mt-1 leading-6 text-muted">
-                {activeReasoningMessage.processing_logs[activeReasoningMessage.processing_logs.length - 1]?.detail}
-              </div>
-            </div>
-          )}
-          <div className="mt-5 max-h-[60vh] space-y-3 overflow-y-auto pr-1">
-            {(activeReasoningMessage?.processing_logs || []).map((log, index) => (
-              <div key={log.step_id || `${log.label}-${index}`} className="rounded-2xl border border-white/10 bg-panel/80 px-4 py-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{log.label}</div>
-                <div className="mt-2 leading-6 text-ink">{log.detail}</div>
-              </div>
-            ))}
-            {!(activeReasoningMessage?.processing_logs || []).length && (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-muted">
-                Waiting for reasoning steps...
-              </div>
-            )}
-          </div>
-        </div>
-      </ModalShell>
 
       <ModalShell
         open={!!activeCitation}

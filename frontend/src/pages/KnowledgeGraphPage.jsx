@@ -22,6 +22,10 @@ function randomColorForString(name) {
   return `hsl(${hash % 360},78%,60%)`
 }
 
+function semanticPairKey(source, target) {
+  return [String(source), String(target)].sort().join('::')
+}
+
 function sphereMap(seed, radius = 1400, index = 0, total = 1) {
   const hashTo01 = (source) => {
     let hash = 2166136261 >>> 0
@@ -261,6 +265,44 @@ export default function KnowledgeGraphPage() {
     return ids
   }, [rawLinks, selectedNodeId, showSemanticEdges, semanticSimilarityFloor])
 
+  const semanticEdgeGroups = useMemo(() => {
+    const parent = new Map()
+    const find = (item) => {
+      const key = String(item)
+      if (!parent.has(key)) parent.set(key, key)
+      const current = parent.get(key)
+      if (current === key) return key
+      const root = find(current)
+      parent.set(key, root)
+      return root
+    }
+    const union = (a, b) => {
+      const rootA = find(a)
+      const rootB = find(b)
+      if (rootA !== rootB) parent.set(rootB, rootA)
+    }
+    rawLinks.forEach((link) => {
+      const source = typeof link.source === 'string' ? link.source : link.source?.id
+      const target = typeof link.target === 'string' ? link.target : link.target?.id
+      const similarity = Number(link.similarity ?? 0)
+      if (!source || !target || similarity < semanticSimilarityFloor) return
+      union(source, target)
+    })
+    const result = new Map()
+    rawLinks.forEach((link) => {
+      const source = typeof link.source === 'string' ? link.source : link.source?.id
+      const target = typeof link.target === 'string' ? link.target : link.target?.id
+      const similarity = Number(link.similarity ?? 0)
+      if (!source || !target || similarity < semanticSimilarityFloor) return
+      const root = find(source)
+      result.set(semanticPairKey(source, target), {
+        group: root,
+        color: randomColorForString(`semantic-component::${root}`),
+      })
+    })
+    return result
+  }, [rawLinks, semanticSimilarityFloor])
+
   const chunkNodes = useMemo(() => {
     if (mode !== 'chunks') return []
     const parentSub = allSubNodes.find((node) => node.key === selectedSubKey && node.parentKey === selectedMainKey)
@@ -336,6 +378,8 @@ export default function KnowledgeGraphPage() {
             target: subNode.id,
             edge_type: 'structural',
             similarity: 1,
+            color: randomColorForString(`structural::${subNode.parentKey}`),
+            stroke_width: 2.4,
           })
         })
     }
@@ -353,6 +397,8 @@ export default function KnowledgeGraphPage() {
             target: chunkNode.id,
             edge_type: 'structural',
             similarity: 1,
+            color: randomColorForString(`structural::${parentId}`),
+            stroke_width: 2.2,
           })
         }
       })
@@ -365,19 +411,23 @@ export default function KnowledgeGraphPage() {
         if (!source || !target || similarity < semanticSimilarityFloor) return
         const touchesSelection = selectedNodeId && (source === selectedNodeId || target === selectedNodeId)
         if ((currentNodeIds.has(source) && currentNodeIds.has(target)) || touchesSelection) {
+          const group = semanticEdgeGroups.get(semanticPairKey(source, target))
           links.push({
             id: `${source}::${target}::${similarity}`,
             source,
             target,
             edge_type: link.edge_type || 'semantic',
             similarity,
+            semantic_group: group?.group || semanticPairKey(source, target),
+            color: group?.color || randomColorForString(`semantic::${semanticPairKey(source, target)}`),
+            stroke_width: 3 + Math.max(0, similarity - semanticSimilarityFloor) * 8,
           })
         }
       })
       }
     }
     return links
-  }, [allSubNodes, chunkNodes, mode, rawChunks, rawLinks, selectedMainKey, selectedSubKey, visibleNodes, showStructuralEdges, showSemanticEdges, semanticSimilarityFloor, selectedNodeId])
+  }, [allSubNodes, chunkNodes, mode, rawChunks, rawLinks, selectedMainKey, selectedSubKey, visibleNodes, showStructuralEdges, showSemanticEdges, semanticSimilarityFloor, selectedNodeId, semanticEdgeGroups])
 
   const adjacency = useMemo(() => {
     const relatedNodeIds = new Set()

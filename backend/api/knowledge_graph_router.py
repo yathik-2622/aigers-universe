@@ -1,6 +1,7 @@
 import math
 from collections import defaultdict
 
+import structlog
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
@@ -9,6 +10,7 @@ from db.collection_names import AIGERS_CHUNKS, AIGERS_DOCUMENTS, AIGERS_GRAPH_LA
 from db.mongo_client import get_db
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -36,7 +38,8 @@ def _project_embeddings(vectors: list[list[float]], dims: int = 3) -> list[list[
             padded = (row + [0.0] * dims)[:dims]
             points.append([float(padded[0]), float(padded[1]), float(padded[2] if dims > 2 else 0.0)])
         return points
-    except Exception:
+    except Exception as exc:
+        logger.warning("knowledge_graph.embedding_projection_failed", error=str(exc))
         return [[0.0, 0.0, 0.0] for _ in vectors]
 
 

@@ -3,6 +3,14 @@ import axios from 'axios'
 const baseURL = import.meta.env.VITE_REACT_APP_BACKEND_URL || ''
 const AUTH_STORAGE_KEY = 'aigers.auth'
 
+export function apiErrorMessage(err, fallback = 'Request failed') {
+  const detail = err?.response?.data?.detail
+  const requestId = err?.response?.headers?.['x-request-id'] || detail?.request_id
+  const message = typeof detail === 'string' ? detail : detail?.message
+  const code = detail?.error_code
+  return [message || err?.message || fallback, code ? `Code: ${code}` : '', requestId ? `Request: ${requestId}` : ''].filter(Boolean).join(' | ')
+}
+
 function clearExpiredAuth() {
   try { localStorage.removeItem(AUTH_STORAGE_KEY) } catch {}
   if (window.location.pathname !== '/login') {
@@ -33,7 +41,16 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    console.error('API error:', err?.response?.data || err.message)
+    const userMessage = apiErrorMessage(err)
+    console.error('API error:', {
+      status: err?.response?.status,
+      request_id: err?.response?.headers?.['x-request-id'] || err?.response?.data?.detail?.request_id,
+      payload: err?.response?.data || err.message,
+    })
+    if (err?.response?.data && typeof err.response.data.detail === 'object') {
+      err.response.data.raw_detail = err.response.data.detail
+      err.response.data.detail = userMessage
+    }
     if (err?.response?.status === 401) {
       clearExpiredAuth()
     }

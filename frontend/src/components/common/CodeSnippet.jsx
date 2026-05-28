@@ -1,88 +1,111 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
+import { Check, Copy } from 'lucide-react'
+import Prism from 'prismjs'
+import 'prismjs/components/prism-markup'
+import 'prismjs/components/prism-json'
+import 'prismjs/components/prism-javascript'
+import 'prismjs/components/prism-jsx'
+import 'prismjs/components/prism-typescript'
+import 'prismjs/components/prism-tsx'
+import 'prismjs/components/prism-python'
+import 'prismjs/components/prism-bash'
+import 'prismjs/components/prism-css'
+import 'prismjs/components/prism-sql'
+import 'prismjs/components/prism-yaml'
+import 'prismjs/components/prism-java'
+import 'prismjs/components/prism-go'
+import 'prismjs/components/prism-ruby'
+import 'prismjs/components/prism-markdown'
 
-const KEYWORDS = new Set(['from', 'import', 'async', 'await', 'def', 'class', 'return', 'if', 'else', 'elif', 'for', 'while', 'try', 'except', 'with', 'const', 'let', 'function', 'new'])
-
-function tokenizeLine(line) {
-  const tokens = []
-  let i = 0
-  while (i < line.length) {
-    const current = line[i]
-    const next = line[i + 1]
-
-    if (current === '#' || (current === '/' && next === '/')) {
-      tokens.push({ type: 'comment', value: line.slice(i) })
-      break
-    }
-
-    if (current === '"' || current === '\'') {
-      let j = i + 1
-      while (j < line.length) {
-        if (line[j] === current && line[j - 1] !== '\\') {
-          j += 1
-          break
-        }
-        j += 1
-      }
-      tokens.push({ type: 'string', value: line.slice(i, j) })
-      i = j
-      continue
-    }
-
-    if (/\d/.test(current)) {
-      let j = i + 1
-      while (j < line.length && /[\d.]/.test(line[j])) j += 1
-      tokens.push({ type: 'number', value: line.slice(i, j) })
-      i = j
-      continue
-    }
-
-    if (/[A-Za-z_]/.test(current)) {
-      let j = i + 1
-      while (j < line.length && /[A-Za-z0-9_]/.test(line[j])) j += 1
-      const value = line.slice(i, j)
-      tokens.push({ type: KEYWORDS.has(value) ? 'keyword' : 'plain', value })
-      i = j
-      continue
-    }
-
-    tokens.push({ type: 'plain', value: current })
-    i += 1
-  }
-  return tokens
+const LANGUAGE_ALIASES = {
+  js: 'javascript',
+  jsx: 'jsx',
+  ts: 'typescript',
+  tsx: 'tsx',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  yml: 'yaml',
+  html: 'markup',
+  xml: 'markup',
+  md: 'markdown',
+  tool: 'json',
+  'tool args': 'json',
+  'tool result': 'json',
 }
 
-function tokenClass(type) {
-  if (type === 'keyword') return 'text-[#ff7b72]'
-  if (type === 'string') return 'text-[#7ee787]'
-  if (type === 'number') return 'text-[#79c0ff]'
-  if (type === 'comment') return 'text-muted'
-  return ''
+function normalizeCode(value) {
+  const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  return raw
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\/\/n/g, '\n')
 }
 
+function inferLanguage(code, language) {
+  const normalized = (language || '').toLowerCase().trim()
+  if (normalized) return LANGUAGE_ALIASES[normalized] || normalized
+  const text = code.trim()
+  if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) return 'json'
+  if (/^(curl|npm|pnpm|yarn|python|pip|uvicorn|pytest)\b/m.test(text)) return 'bash'
+  if (/^\s*(import|export|const|let|function|class)\b/m.test(text)) return 'javascript'
+  if (/^\s*(def|class|from|import)\b/m.test(text)) return 'python'
+  return 'text'
+}
 
-function renderLine(line, idx) {
-  const tokens = tokenizeLine(line)
-  return (
-    <div key={idx} className="grid grid-cols-[42px_1fr] gap-3">
-      <div className="text-right text-muted select-none">{idx + 1}</div>
+function highlightedHtml(code, language) {
+  const grammar = Prism.languages[language]
+  if (!grammar) return Prism.util.encode(code)
+  return Prism.highlight(code, grammar, language)
+}
 
-      <div className="whitespace-pre-wrap break-words">
-        {tokens.length === 0 ? '\u00a0' : tokens.map((token, tokenIdx) => (
-          <span key={`${idx}-${tokenIdx}`} className={tokenClass(token.type)}>
-            {token.value}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
+function badgeClass(language) {
+  if (['json', 'yaml'].includes(language)) return 'border-amber-300/20 bg-amber-300/10 text-amber-200'
+  if (['python', 'bash', 'shell'].includes(language)) return 'border-emerald-300/20 bg-emerald-300/10 text-emerald-200'
+  if (['javascript', 'jsx', 'typescript', 'tsx'].includes(language)) return 'border-cyan-300/20 bg-cyan-300/10 text-cyan-200'
+  if (['sql', 'go', 'java', 'ruby'].includes(language)) return 'border-violet-300/20 bg-violet-300/10 text-violet-200'
+  if (['markup', 'css', 'markdown'].includes(language)) return 'border-rose-300/20 bg-rose-300/10 text-rose-200'
+  return 'border-white/10 bg-black/20 text-muted'
 }
 
 export default function CodeSnippet({ code, language = '' }) {
-  return (
-    <div className="overflow-auto rounded-[22px] border border-line bg-panel px-4 py-4 font-mono text-[12px] leading-6 text-ink">
-      {language ? <div className="mb-3 text-[10px] uppercase tracking-[0.18em] text-muted">{language}</div> : null}
+  const [copied, setCopied] = useState(false)
+  const normalized = useMemo(() => normalizeCode(code || ''), [code])
+  const lang = useMemo(() => inferLanguage(normalized, language), [normalized, language])
+  const html = useMemo(() => highlightedHtml(normalized, lang), [normalized, lang])
+  const lines = normalized.split('\n')
 
-      {(code || '').split('\n').map(renderLine)}
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(normalized)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <div className="group overflow-hidden rounded-xl border border-white/10 bg-[#070b13] shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.035] px-3 py-2">
+        <div className="inline-flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-accent2" />
+          <span className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] ${badgeClass(lang)}`}>
+            {lang}
+          </span>
+          <span className="font-mono text-[10px] text-muted">{lines.length} lines</span>
+        </div>
+        <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-muted hover:border-accent/30 hover:text-ink">
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div className="max-h-[520px] overflow-auto">
+        <pre className={`language-${lang} m-0 min-w-full p-0 font-mono text-[12px] leading-6`}>
+          <code className={`language-${lang} block p-4`} dangerouslySetInnerHTML={{ __html: html }} />
+        </pre>
+      </div>
     </div>
   )
 }

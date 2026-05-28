@@ -7,6 +7,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from core.agent_code_export import export_agent_code
+from core.api_errors import public_error, request_id_from
 from core.request_context import get_optional_user_id
 from core.runtime_settings import discover_models_for_user
 from db.repositories.agent_repo import AgentRepository
@@ -51,7 +52,7 @@ async def register_agent(request: Request, body: RegisterAgentRequest):
         return {"agent_id": agent_id, "name": body.name, "status": "active"}
     except Exception as exc:
         logger.error("api.agent.register_failed", error=str(exc))
-        raise HTTPException(status_code=500, detail="Failed to register agent")
+        raise HTTPException(status_code=500, detail=public_error("Failed to register agent", "AGENT_REGISTER_FAILED", request_id_from(request)))
 
 
 @router.get("/agents")
@@ -122,7 +123,7 @@ async def invoke_agent(agent_id: str, request: Request, body: InvokeAgentRequest
         return result
     except Exception as exc:
         logger.error("api.agent.invoke_failed", agent_id=agent_id, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Agent invocation failed: {exc}")
+        raise HTTPException(status_code=500, detail=public_error("Agent invocation failed", "AGENT_INVOKE_FAILED", request_id_from(request)))
 
 
 @router.get("/tools")
