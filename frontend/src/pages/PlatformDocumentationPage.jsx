@@ -495,21 +495,6 @@ export default function PlatformDocumentationPage() {
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [])
 
-  useEffect(() => {
-    const revealNodes = Array.from(document.querySelectorAll('.platform-docs .scroll-reveal, .platform-docs .scroll-reveal-left, .platform-docs .scroll-reveal-right, .platform-docs .scroll-pop'))
-    if (!revealNodes.length) return undefined
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('is-visible')
-          observer.unobserve(entry.target)
-        }
-      })
-    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' })
-    revealNodes.forEach((node) => observer.observe(node))
-    return () => observer.disconnect()
-  }, [filteredSections.length])
-
   const filteredSections = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     return DOC_SECTIONS.filter((section) => {
@@ -529,6 +514,21 @@ export default function PlatformDocumentationPage() {
         .includes(normalized)
     })
   }, [query, selected])
+
+  useEffect(() => {
+    const revealNodes = Array.from(document.querySelectorAll('.platform-docs .scroll-reveal, .platform-docs .scroll-reveal-left, .platform-docs .scroll-reveal-right, .platform-docs .scroll-pop'))
+    if (!revealNodes.length) return undefined
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible')
+          observer.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' })
+    revealNodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [filteredSections.length])
 
   return (
     <div className="platform-docs neon-rainbow-bg relative min-h-screen overflow-x-hidden text-white">

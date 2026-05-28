@@ -19,6 +19,24 @@ function formatDate(value) {
   }
 }
 
+function getRunInputSummary(run) {
+  const input = run?.input_data || {}
+  const workflowInputs = input.workflow_inputs || {}
+  const uploadedFiles = workflowInputs.uploaded_files || []
+  const kbDocuments = workflowInputs.knowledge_base_documents || []
+  const uploadIds = workflowInputs.upload_document_ids || []
+  const kbIds = workflowInputs.kb_document_ids || input.kb_document_ids || []
+  return {
+    prompt: input.user_prompt || workflowInputs.text || '',
+    uploadedFiles,
+    uploadCount: uploadedFiles.length || uploadIds.length,
+    kbDocuments,
+    kbCount: kbDocuments.length || kbIds.length,
+    repoUrl: workflowInputs.github_repo?.repo_url || workflowInputs.repo_url || input.repo_url || '',
+    repoDocument: workflowInputs.github_repo || null,
+  }
+}
+
 export default function ProjectsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -151,15 +169,21 @@ export default function ProjectsPage() {
             tools: node.data?.tools || [],
             input_bindings: node.data?.input_bindings || node.data?.inputBindings || {},
           })),
-          runs: workflowRuns.slice(0, 8).map((run) => ({
-            run_id: run.run_id,
-            status: run.status,
-            started_at: run.started_at,
-            prompt: run.input_data?.user_prompt || run.input_data?.workflow_inputs?.text || '',
-            uploaded_files: run.input_data?.workflow_inputs?.upload_document_ids || [],
-            repo_url: run.input_data?.workflow_inputs?.repo_url || run.input_data?.repo_url || '',
-            kb_document_ids: run.input_data?.workflow_inputs?.kb_document_ids || run.input_data?.kb_document_ids || [],
-          })),
+          runs: workflowRuns.slice(0, 8).map((run) => {
+            const summary = getRunInputSummary(run)
+            return {
+              run_id: run.run_id,
+              status: run.status,
+              started_at: run.started_at,
+              prompt: summary.prompt,
+              uploaded_files: summary.uploadedFiles,
+              uploaded_file_count: summary.uploadCount,
+              repo_url: summary.repoUrl,
+              repo_document: summary.repoDocument,
+              kb_documents: summary.kbDocuments,
+              kb_document_count: summary.kbCount,
+            }
+          }),
         },
         orchestratorStream: [{
           id: `copied-${Date.now()}`,
@@ -255,6 +279,7 @@ export default function ProjectsPage() {
             const canDeleteWorkflow = user?.role === 'admin' || projectOwnerCanDelete || workflowOwnerCanDelete
             const workflowRuns = runs.filter((run) => run.workflow_id === workflow.workflow_id)
             const lastRun = workflowRuns[0]
+            const lastRunInputs = getRunInputSummary(lastRun)
             return (
               <div key={workflow.workflow_id} className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -274,11 +299,31 @@ export default function ProjectsPage() {
                     {lastRun?.input_data && (
                       <details className="mt-3 rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
                         <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-accent">Previous run inputs</summary>
-                        <div className="mt-2 grid gap-2 text-[12px] text-muted md:grid-cols-2">
-                          <div>Prompt: {lastRun.input_data?.user_prompt || lastRun.input_data?.workflow_inputs?.text || 'No prompt captured'}</div>
-                          <div>Uploaded files: {(lastRun.input_data?.workflow_inputs?.upload_document_ids || []).length}</div>
-                          <div>KB docs: {(lastRun.input_data?.workflow_inputs?.kb_document_ids || lastRun.input_data?.kb_document_ids || []).length}</div>
-                          <div>Repo: {lastRun.input_data?.workflow_inputs?.repo_url || lastRun.input_data?.repo_url || 'None'}</div>
+                        <div className="mt-2 space-y-3 text-[12px] text-muted">
+                          <div>
+                            <span className="text-ink">Prompt:</span> {lastRunInputs.prompt || 'No text prompt provided for this run'}
+                          </div>
+                          <div>
+                            <span className="text-ink">Uploaded files:</span> {lastRunInputs.uploadCount || 0}
+                            {lastRunInputs.uploadedFiles.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {lastRunInputs.uploadedFiles.slice(0, 4).map((file) => (
+                                  <span key={file.document_id} className="rounded-full border border-white/10 bg-white/5 px-2 py-1">{file.filename || file.document_id}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-ink">KB docs:</span> {lastRunInputs.kbCount || 0}
+                            {lastRunInputs.kbDocuments.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {lastRunInputs.kbDocuments.slice(0, 4).map((doc) => (
+                                  <span key={doc.document_id} className="rounded-full border border-white/10 bg-white/5 px-2 py-1">{doc.filename || doc.document_id}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div><span className="text-ink">Repo:</span> {lastRunInputs.repoUrl || 'None'}</div>
                         </div>
                       </details>
                     )}
