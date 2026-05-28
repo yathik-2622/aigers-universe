@@ -258,29 +258,33 @@ function ProcessingPanel({ logs, active = false }) {
 function ToolActivity({ items }) {
   if (!items?.length) return null
   return (
-    <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.025] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
-          <Wrench size={13} className="text-accent2" />
-          Tool activity
-        </div>
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{items.length}</span>
-      </div>
-      <div className="mt-3 max-h-[340px] space-y-2 overflow-y-auto pr-1">
-        {items.map((item, index) => (
-          <div key={`${item.tool}-${index}`} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{item.tool}</div>
-            <div className="mt-3 grid gap-3 xl:grid-cols-2">
-              <CodeSnippet code={JSON.stringify(item.args || {}, null, 2)} language="tool args" />
-              <CodeSnippet code={JSON.stringify(item.result || {}, null, 2)} language="tool result" />
+    <div className="mt-4">
+      <details className="group rounded-2xl border border-white/8 bg-white/[0.025] p-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted transition group-hover:text-ink">
+            <Wrench size={13} className="text-accent2" />
+            Tool activity
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{items.length}</span>
+            <ChevronDown size={13} className="text-muted transition group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className="mt-3 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+          {items.map((item, index) => (
+            <div key={`${item.tool}-${index}`} className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-muted backdrop-blur-sm">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{item.tool}</div>
+              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                <CodeSnippet code={JSON.stringify(item.args || {}, null, 2)} language="tool args" />
+                <CodeSnippet code={JSON.stringify(item.result || {}, null, 2)} language="tool result" />
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </details>
     </div>
   )
 }
-
 function AssistantMessage({ message, onCopy, onRegenerate, onOpenCitation, onFollowUp }) {
   return (
     <div className="mx-auto w-full max-w-4xl py-7">

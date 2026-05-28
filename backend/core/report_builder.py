@@ -128,6 +128,63 @@ def _format_structured_value(value, indent: int = 0) -> list[str]:
     return [f"{prefix}- {value}"]
 
 
+def _format_dict_table(items: list[dict], preferred_keys: list[str]) -> list[str]:
+    rows = [item for item in items if isinstance(item, dict)]
+    if not rows:
+        return []
+    keys = [key for key in preferred_keys if any(row.get(key) not in (None, "", []) for row in rows)]
+    if not keys:
+        keys = list(rows[0].keys())[:4]
+    lines = [
+        "| " + " | ".join(_humanize_key(key) for key in keys) + " |",
+        "| " + " | ".join("---" for _ in keys) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_excerpt(str(row.get(key, "-")), 260).replace("|", "/") for key in keys) + " |")
+    return lines
+
+
+def _format_agent_output_markdown(agent_name: str, output) -> list[str]:
+    if not isinstance(output, dict):
+        return _format_structured_value(output)
+    lines: list[str] = []
+    scalar_items = []
+    for key, value in output.items():
+        if key in NOISE_OUTPUT_KEYS and not value:
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        scalar_items.append((key, value))
+    if scalar_items:
+        lines.extend(["| Field | Value |", "|---|---|"])
+        for key, value in scalar_items:
+            lines.append(f"| {_humanize_key(key)} | {_excerpt(str(value), 420).replace('|', '/')} |")
+    table_preferences = {
+        "violations": ["severity", "issue", "rule_name", "reason", "remediation", "recommendation"],
+        "redlines": ["original", "replacement", "reason"],
+        "recommended_fixes": ["issue", "recommendation"],
+        "recommendations": ["priority", "action", "rationale"],
+        "key_clauses": ["title", "description", "content"],
+        "entities": ["name", "role", "type", "value"],
+        "dates": ["type", "value"],
+        "amounts": ["type", "value"],
+    }
+    for key, preferred in table_preferences.items():
+        value = output.get(key)
+        if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+            lines.extend(["", f"#### {_humanize_key(key)}"])
+            lines.extend(_format_dict_table(value, preferred))
+    for key, value in output.items():
+        if key in table_preferences or key in NOISE_OUTPUT_KEYS or not isinstance(value, list):
+            continue
+        if value and all(not isinstance(item, dict) for item in value):
+            lines.extend(["", f"#### {_humanize_key(key)}"])
+            lines.extend(f"- {item}" for item in value)
+    if not lines:
+        lines.extend(_format_structured_value(output))
+    return lines
+
+
 def _build_outcome_markdown(final_output: dict) -> list[str]:
     summary = final_output.get("summary") or final_output.get("executive_summary") or final_output.get("result") or ""
     recommendation = final_output.get("overall_recommendation") or final_output.get("approval_recommendation") or final_output.get("decision") or ""
@@ -139,14 +196,19 @@ def _build_outcome_markdown(final_output: dict) -> list[str]:
     actions = final_output.get("recommendations") or final_output.get("recommended_fixes") or final_output.get("mitigations") or []
     if actions:
         lines.extend(["", "## Priority Actions"])
+        table_rows = []
         for item in _as_list(actions):
             if isinstance(item, dict):
                 priority = item.get("priority") or item.get("severity") or "ACTION"
                 action = item.get("action") or item.get("recommendation") or item.get("issue") or item.get("title") or "Recommended action"
                 rationale = item.get("rationale") or item.get("reason") or ""
-                lines.append(f"- **{priority}:** {action}{f' - {rationale}' if rationale else ''}")
+                table_rows.append((priority, action, rationale))
             else:
-                lines.append(f"- {item}")
+                table_rows.append(("ACTION", str(item), ""))
+        if table_rows:
+            lines.extend(["| Priority | Action | Rationale |", "|---|---|---|"])
+            for priority, action, rationale in table_rows:
+                lines.append(f"| {priority} | {action} | {rationale or '-'} |")
     brief = final_output.get("executive_brief") or final_output.get("key_findings") or final_output.get("key_risks") or []
     if brief:
         lines.extend(["", "## Key Findings"])
@@ -223,7 +285,7 @@ def _build_domain_markdown(run: dict, last_agent: dict, final_output: dict) -> s
             if agent == agent_name:
                 continue
             lines.append(f"### {agent}")
-            lines.extend(_format_structured_value(output))
+            lines.extend(_format_agent_output_markdown(agent, output))
     return "\n".join(lines).strip()
 
 

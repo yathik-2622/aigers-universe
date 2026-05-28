@@ -172,6 +172,13 @@ function ErDiagramView({ source }) {
 }
 
 function TableBlock({ table }) {
+  const rowTone = (row) => {
+    const text = row.join(' ').toLowerCase()
+    if (/\b(high|red|fail|reject|critical|blocker)\b/.test(text)) return 'border-rose-300/18 bg-rose-400/[0.055]'
+    if (/\b(low|green|pass|approve|ok|success)\b/.test(text)) return 'border-emerald-300/18 bg-emerald-400/[0.045]'
+    if (/\b(medium|review|warning|amber)\b/.test(text)) return 'border-amber-300/18 bg-amber-300/[0.045]'
+    return 'border-white/5'
+  }
   return (
     <div className="overflow-x-auto rounded-[24px] border border-white/10 bg-white/[0.03]">
       <table className="min-w-full border-collapse text-sm">
@@ -184,9 +191,9 @@ function TableBlock({ table }) {
         </thead>
         <tbody>
           {table.rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-t border-white/5 text-[#ced8eb]">
+            <tr key={rowIndex} className={`border-t text-[#ced8eb] ${rowTone(row)}`}>
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="px-4 py-3 align-top">{cell}</td>
+                <td key={cellIndex} className="px-4 py-3 align-top" dangerouslySetInnerHTML={{ __html: parseInline(cell) }} />
               ))}
             </tr>
           ))}

@@ -24,7 +24,7 @@ function toolLabel(item) {
 }
 
 function statusText(items, active) {
-  if (!active && items.length > 0) return `Complete - ${items.length} steps`
+  if (!active && items.length > 0) return `Activity recorded - ${items.length} steps`
   if (!items.length) return active ? 'Thinking...' : 'No activity yet'
   const last = items[items.length - 1]
   if (last.tone === 'tool') return `Using tool: ${toolLabel(last)}...`

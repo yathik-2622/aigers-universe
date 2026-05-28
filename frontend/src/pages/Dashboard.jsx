@@ -8,6 +8,7 @@ import { listAgents } from '../api/platform.js'
 import { getPending } from '../api/hitl.js'
 import { listDocuments } from '../api/documents.js'
 import DocumentViewerModal from '../components/common/DocumentViewerModal.jsx'
+import ConfirmDialog from '../components/common/ConfirmDialog.jsx'
 import StatusBadge from '../components/common/StatusBadge.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const [pending, setPending] = useState([])
   const [documents, setDocuments] = useState([])
   const [activeDocumentId, setActiveDocumentId] = useState('')
+  const [deleteRunTarget, setDeleteRunTarget] = useState(null)
 
   const load = async () => {
     try {
@@ -54,11 +56,12 @@ export default function Dashboard() {
     return () => clearInterval(t)
   }, [])
 
-  const handleDeleteRun = async (runId) => {
-    if (!window.confirm('Delete this run history item? This removes its traces/messages too.')) return
+  const handleDeleteRun = async () => {
+    if (!deleteRunTarget) return
     try {
-      await deleteRun(runId)
-      setRuns((prev) => prev.filter((item) => item.run_id !== runId))
+      await deleteRun(deleteRunTarget.run_id)
+      setRuns((prev) => prev.filter((item) => item.run_id !== deleteRunTarget.run_id))
+      setDeleteRunTarget(null)
       toast.success('Run deleted')
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to delete run')
@@ -102,7 +105,7 @@ export default function Dashboard() {
               <div className="text-[11px] uppercase tracking-widest text-muted">Recent workflow runs</div>
               <div className="font-display text-lg mt-0.5">Execution feed</div>
             </div>
-            <Link to="/observability" className="text-[12px] text-accent hover:underline">View all →</Link>
+            <Link to="/observability" className="text-[12px] text-accent hover:underline">View all -&gt;</Link>
           </div>
           <div className="space-y-2">
             {runs.length === 0 && (
@@ -123,7 +126,7 @@ export default function Dashboard() {
                 <StatusBadge status={r.status} />
                 {(user?.role === 'admin' || user?.user_id === r.owner_user_id) && (
                   <button
-                    onClick={() => handleDeleteRun(r.run_id)}
+                    onClick={() => setDeleteRunTarget(r)}
                     className="inline-flex items-center justify-center rounded-full border border-[#ef476f]/30 bg-[#ef476f]/10 p-2 text-[#ef476f] hover:bg-[#ef476f]/15"
                     title="Delete run"
                     aria-label="Delete run"
@@ -142,7 +145,7 @@ export default function Dashboard() {
               <div className="text-[11px] uppercase tracking-widest text-muted">Approvals queue</div>
               <div className="font-display text-lg mt-0.5">Pending HITL</div>
             </div>
-            <Link to="/hitl" className="text-[12px] text-accent hover:underline">Open →</Link>
+            <Link to="/hitl" className="text-[12px] text-accent hover:underline">Open -&gt;</Link>
           </div>
           <div className="space-y-2">
             {pending.length === 0 && <div className="text-center py-10 text-muted text-sm">All clear. No pending approvals.</div>}
@@ -184,6 +187,15 @@ export default function Dashboard() {
       </div>
 
       <DocumentViewerModal documentId={activeDocumentId} open={!!activeDocumentId} onClose={() => setActiveDocumentId('')} />
+      <ConfirmDialog
+        open={!!deleteRunTarget}
+        onClose={() => setDeleteRunTarget(null)}
+        onConfirm={handleDeleteRun}
+        title="Delete workflow run?"
+        description={`This removes ${deleteRunTarget?.workflow_name || deleteRunTarget?.run_id || 'this run'} from run history, including related traces and messages.`}
+        confirmLabel="Delete run"
+        tone="danger"
+      />
     </div>
   )
 }

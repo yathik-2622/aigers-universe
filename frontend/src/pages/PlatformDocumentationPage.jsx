@@ -342,9 +342,28 @@ compressed = _compress_text_for_query(text, query)`,
   },
 ]
 
+const ARCHITECTURE_LAYERS = [
+  {
+    title: 'Experience layer',
+    body: 'Landing, login, dashboard, builder, run page, Copilot, marketplace, KB, observability, and docs route. Each page owns a clear operator job and keeps dense state readable.',
+  },
+  {
+    title: 'Planning layer',
+    body: 'The workflow router coordinates prompt interpretation, clarification, market research, technical design output, marketplace matching, and final canvas-ready plan generation.',
+  },
+  {
+    title: 'Execution layer',
+    body: 'The workflow engine executes framework-native agents, binds inputs, records A2A messages, pauses for HITL, and persists run outputs and status snapshots.',
+  },
+  {
+    title: 'Evidence layer',
+    body: 'Report builder, Markdown renderer, citation source APIs, and document viewers turn traces and sources into readable final artifacts with highlighted context.',
+  },
+]
+
 function StatCard({ label, value, detail }) {
   return (
-    <div className="rounded-[28px] border border-white/10 bg-white/[0.05] px-5 py-5 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30">
+    <div className="scroll-reveal border border-white/10 bg-white/[0.05] px-5 py-5 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30">
       <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/65">{label}</div>
       <div className="mt-3 text-3xl font-semibold text-white">{value}</div>
       <div className="mt-2 text-sm leading-6 text-slate-300">{detail}</div>
@@ -357,13 +376,13 @@ function DepthPanel({ title, items, accent = 'cyan' }) {
   const glow = accent === 'amber' ? 'from-amber-300/12' : 'from-cyan-300/12'
 
   return (
-    <div className={`rounded-[28px] border ${border} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)]`}>
+    <div className={`scroll-reveal border ${border} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)]`}>
       <div className={`mb-3 rounded-full border border-white/10 bg-gradient-to-r ${glow} to-transparent px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/70`}>
         {title}
       </div>
       <div className="space-y-3">
         {items.map((item) => (
-          <div key={item} className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3 text-sm leading-6 text-slate-200">
+          <div key={item} className="border border-white/8 bg-black/10 px-4 py-3 text-sm leading-6 text-slate-200">
             {item}
           </div>
         ))}
@@ -377,7 +396,7 @@ function PageSection({ section }) {
   return (
     <section
       id={section.id}
-      className="group relative overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(7,15,28,0.96),rgba(4,10,20,0.94))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)] transition duration-500 hover:border-cyan-300/25"
+      className="scroll-reveal group relative overflow-hidden border border-white/10 bg-[linear-gradient(180deg,rgba(7,15,28,0.96),rgba(4,10,20,0.94))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.28)] transition duration-500 hover:border-cyan-300/25"
       style={{ transformStyle: 'preserve-3d' }}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.14),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(34,197,94,0.10),transparent_22%)] opacity-90" />
@@ -385,7 +404,7 @@ function PageSection({ section }) {
       <div className="relative z-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.18)]">
+            <div className="border border-cyan-300/20 bg-cyan-300/10 p-3 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.18)]">
               <Icon size={20} />
             </div>
             <div>
@@ -401,22 +420,22 @@ function PageSection({ section }) {
         <p className="mt-5 max-w-4xl text-[15px] leading-7 text-slate-200">{section.summary}</p>
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[1.15fr_1fr]">
-          <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5">
+          <div className="border border-white/10 bg-white/[0.04] p-5 transition duration-300 hover:border-cyan-300/20 hover:bg-white/[0.055]">
             <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/60">Why this page exists</div>
             <p className="mt-3 text-sm leading-7 text-slate-200">{section.why}</p>
             <div className="mt-5 flex flex-wrap gap-2">
               {section.files.map((file) => (
-                <span key={file} className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300">
+                <span key={file} className="border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300">
                   {file}
                 </span>
               ))}
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(14,26,40,0.92),rgba(8,15,25,0.86))] p-5">
+          <div className="border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(14,26,40,0.92),rgba(8,15,25,0.86))] p-5">
             <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/60">Implementation lens</div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+              <div className="border border-white/8 bg-white/[0.03] p-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-white/55">Frontend</div>
                 <div className="mt-3 space-y-3">
                   {section.frontend.map((item) => (
@@ -426,7 +445,7 @@ function PageSection({ section }) {
                   ))}
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+              <div className="border border-white/8 bg-white/[0.03] p-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-white/55">Backend</div>
                 <div className="mt-3 space-y-3">
                   {section.backend.map((item) => (
@@ -443,7 +462,7 @@ function PageSection({ section }) {
         {section.snippets?.length ? (
           <div className="mt-6 space-y-3">
             {section.snippets.map((snippet) => (
-              <details key={snippet.label} className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 open:border-cyan-300/20">
+              <details key={snippet.label} className="border border-white/10 bg-white/[0.04] p-4 transition duration-300 open:border-cyan-300/20">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-white">
                   <span>{snippet.label}</span>
                   <ChevronDown size={16} className="text-cyan-100/70" />
@@ -497,24 +516,24 @@ export default function PlatformDocumentationPage() {
   }, [query, selected])
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#020814] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_22%),radial-gradient(circle_at_15%_20%,rgba(96,165,250,0.10),transparent_26%),radial-gradient(circle_at_80%_12%,rgba(217,70,239,0.12),transparent_18%),radial-gradient(circle_at_88%_24%,rgba(251,146,60,0.08),transparent_14%),linear-gradient(180deg,#030915_0%,#07111d_38%,#040913_100%)]" />
+    <div className="neon-rainbow-bg relative min-h-screen overflow-x-hidden text-white">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(2,8,20,0.28)_52%,rgba(2,8,20,0.84)_100%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-50" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px)', backgroundSize: '24px 24px' }} />
-      <div className="pointer-events-none absolute left-[-120px] top-24 h-72 w-72 rounded-full border border-cyan-300/10 bg-cyan-300/8 blur-3xl" />
-      <div className="pointer-events-none absolute right-[-80px] top-56 h-64 w-64 rounded-full border border-blue-300/10 bg-blue-300/8 blur-3xl" />
+      <div className="pointer-events-none absolute left-[-120px] top-24 h-72 w-72 rounded-full border border-cyan-300/10 bg-cyan-300/8 blur-3xl animate-float-soft" />
+      <div className="pointer-events-none absolute right-[-80px] top-56 h-64 w-64 rounded-full border border-blue-300/10 bg-blue-300/8 blur-3xl animate-float-slower" />
       <div className="pointer-events-none absolute left-0 right-0 top-24 h-px bg-gradient-to-r from-transparent via-cyan-300/55 to-transparent" />
       <div className="pointer-events-none absolute left-0 right-0 top-28 h-px bg-gradient-to-r from-transparent via-fuchsia-300/35 to-transparent" />
 
       <div className="relative z-10 mx-auto max-w-[1400px] px-5 py-8 sm:px-8 lg:px-10">
-        <section className="overflow-hidden rounded-[36px] border border-cyan-300/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] sm:px-8">
+        <section className="scroll-reveal overflow-hidden border border-cyan-300/12 bg-[linear-gradient(145deg,rgba(9,18,33,0.94),rgba(5,10,20,0.92))] px-6 py-7 shadow-[0_28px_120px_rgba(0,0,0,0.32)] transition duration-500 hover:border-cyan-300/20 sm:px-8">
           <div className="pointer-events-none absolute right-6 top-6 h-12 w-12 border-r border-t border-cyan-300/30" />
           <div className="pointer-events-none absolute bottom-6 left-6 h-12 w-12 border-b border-l border-fuchsia-300/24" />
           <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.24em] text-cyan-100/80">
+            <span className="inline-flex items-center gap-2 border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.24em] text-cyan-100/80">
               <Compass size={12} />
               AIger engineering atlas
             </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-fuchsia-300/18 bg-fuchsia-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/75">
+            <span className="inline-flex items-center gap-2 border border-fuchsia-300/18 bg-fuchsia-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.18em] text-fuchsia-100/75">
               Cyberpunk 3D documentation surface
             </span>
           </div>
@@ -530,7 +549,7 @@ export default function PlatformDocumentationPage() {
             </div>
 
             <div className="grid gap-4 [perspective:1800px]">
-              <div className="rounded-[30px] border border-cyan-300/16 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] [transform:rotateX(10deg)_rotateY(-8deg)]">
+              <div className="scroll-reveal-right border border-cyan-300/16 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(255,255,255,0.03))] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)]">
                 <div className="flex items-center gap-3 text-cyan-100">
                   <CircuitBoard size={20} />
                   <div className="text-sm font-medium">System view</div>
@@ -540,7 +559,7 @@ export default function PlatformDocumentationPage() {
                   <div>Platform docs stay in sync with the current code so the page is a practical handoff artifact, not a stale marketing summary.</div>
                 </div>
               </div>
-              <div className="rounded-[30px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] [transform:rotateX(6deg)_rotateY(7deg)]">
+              <div className="scroll-reveal-right border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)]">
                 <div className="flex items-center gap-3 text-emerald-100">
                   <Network size={20} />
                   <div className="text-sm font-medium">Runtime view</div>
@@ -560,6 +579,27 @@ export default function PlatformDocumentationPage() {
           </div>
         </section>
 
+        <section className="scroll-reveal border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(5,14,26,0.96),rgba(4,9,18,0.96))] px-6 py-6 shadow-[0_26px_90px_rgba(0,0,0,0.24)]">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-100/60">System layers</div>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">How the platform turns intent into governed evidence</h2>
+            </div>
+            <div className="max-w-xl text-sm leading-7 text-slate-300">
+              The documentation page mirrors the product runtime: users start from a goal, the planner builds a controlled architecture, execution records every important transition, and the report layer makes the result inspectable.
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 lg:grid-cols-4">
+            {ARCHITECTURE_LAYERS.map((layer, index) => (
+              <div key={layer.title} className="border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:border-cyan-300/25 hover:bg-white/[0.055]">
+                <div className="font-mono text-[11px] text-cyan-100/55">{String(index + 1).padStart(2, '0')}</div>
+                <div className="mt-3 text-lg font-medium text-white">{layer.title}</div>
+                <div className="mt-3 text-sm leading-7 text-slate-300">{layer.body}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="mt-8 grid gap-5 lg:grid-cols-[0.92fr_1.08fr]">
           <DepthPanel
             title="Platform through-lines"
@@ -570,7 +610,7 @@ export default function PlatformDocumentationPage() {
               'The documentation surface itself now behaves like a navigable engineering atlas with depth, layered glow, collapsible snippets, and route-level structure.',
             ]}
           />
-          <div className="rounded-[30px] border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(7,18,32,0.94),rgba(8,12,24,0.92))] p-5 shadow-[0_16px_50px_rgba(0,0,0,0.2)]">
+          <div className="scroll-reveal-right border border-cyan-300/14 bg-[linear-gradient(180deg,rgba(7,18,32,0.94),rgba(8,12,24,0.92))] p-5 shadow-[0_16px_50px_rgba(0,0,0,0.2)]">
             <div className="flex flex-wrap items-center gap-3">
               <label className="relative min-w-[280px] flex-1">
                 <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-cyan-100/55" />
@@ -709,26 +749,38 @@ export default function PlatformDocumentationPage() {
           ))}
         </div>
 
-        <section className="mt-8 rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(5,11,20,0.96),rgba(3,8,16,0.96))] px-6 py-6 shadow-[0_26px_80px_rgba(0,0,0,0.28)]">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-cyan-300/18 bg-cyan-300/10 px-4 py-1 text-[11px] uppercase tracking-[0.2em] text-cyan-100/75">
-              Reference map
-            </span>
-            <span className="text-sm text-slate-300">Use these files for deeper handoff and implementation review.</span>
+        <section className="scroll-pop mt-8 border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(5,11,20,0.96),rgba(10,16,32,0.94),rgba(4,9,18,0.96))] px-6 py-7 shadow-[0_30px_100px_rgba(0,0,0,0.3)]">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] uppercase tracking-[0.22em] text-cyan-100">
+                <FileCode2 size={13} />
+                Reference map
+              </div>
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">Open the right handoff file fast</h2>
+            </div>
+            <p className="max-w-xl text-sm leading-7 text-slate-300">
+              These are the source-of-truth docs for product behavior, operator usage, runtime architecture, and browser-friendly handoff material.
+            </p>
           </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {[
-              ['README.md', 'High-level product overview, setup, current features, and environment requirements.'],
-              ['USER_GUIDE.md', 'End-user flow, page-by-page usage, testing walkthroughs, and operational advice.'],
-              ['Technical_architecture.md', 'System topology, runtime paths, retrieval planes, observability design, and architecture rationale.'],
-              ['docs/platform-documentation.html', 'Browser-friendly static handoff version of the platform guide.'],
-            ].map(([name, text]) => (
-              <div key={name} className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex items-center gap-2 text-white">
-                  <FileCode2 size={16} className="text-cyan-100" />
-                  <div className="text-sm font-medium">{name}</div>
+              ['README.md', 'Product overview', 'Setup, capabilities, validation checklist, and contributor rules.'],
+              ['USER_GUIDE.md', 'Operator guide', 'End-user journeys, builder flow, Copilot behavior, reports, and smoke tests.'],
+              ['Technical_architecture.md', 'Architecture brief', 'Runtime topology, planner contract, HITL, citations, state, and failure behavior.'],
+              ['docs/platform-documentation.html', 'Static handoff', 'Browser-friendly reference page for external review and demos.'],
+            ].map(([name, label, text], index) => (
+              <div key={name} className="scroll-pop group border border-white/10 bg-white/[0.045] p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/30 hover:bg-white/[0.07]" style={{ animationDelay: `${index * 80}ms` }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-cyan-100/60">{label}</div>
+                    <div className="mt-2 text-base font-semibold text-white">{name}</div>
+                  </div>
+                  <div className="flex h-9 w-9 items-center justify-center border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 transition group-hover:bg-cyan-300/20">
+                    <FileCode2 size={16} />
+                  </div>
                 </div>
-                <div className="mt-3 text-sm leading-6 text-slate-300">{text}</div>
+                <div className="mt-4 text-sm leading-7 text-slate-300">{text}</div>
+                <div className="mt-5 h-px bg-gradient-to-r from-cyan-300/50 via-fuchsia-300/35 to-transparent" />
               </div>
             ))}
           </div>

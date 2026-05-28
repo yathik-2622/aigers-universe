@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Briefcase, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Eye, FileText, Github, Play, Save, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Briefcase, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Eye, FileText, Github, LoaderCircle, Play, Save, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { ReactFlowProvider } from 'reactflow'
 import { toast } from 'sonner'
 import { listProjects } from '../api/projects.js'
@@ -62,6 +62,7 @@ export default function WorkflowBuilderPage() {
   const [installingMissing, setInstallingMissing] = useState(false)
   const [constructingCanvas, setConstructingCanvas] = useState(false)
   const [creatingSuggestedAgents, setCreatingSuggestedAgents] = useState(false)
+  const [runningWorkflow, setRunningWorkflow] = useState(false)
   const [buildPhase, setBuildPhase] = useState('')
   const [orchestratorStream, setOrchestratorStream] = useState([])
   const [showOrchestratorPanel, setShowOrchestratorPanel] = useState(false)
@@ -76,6 +77,7 @@ export default function WorkflowBuilderPage() {
   const fileInput = useRef(null)
   const workflowFileInput = useRef(null)
   const draftHydratedRef = useRef(false)
+  const orchestratorLogRef = useRef(null)
   const latestOrchestratorLabel = orchestratorStream[orchestratorStream.length - 1]?.label || buildPhase || 'Orchestrator'
 
   const applyBuilderDraft = (draft) => {
@@ -136,6 +138,11 @@ export default function WorkflowBuilderPage() {
     }
     try { localStorage.setItem(builderDraftKey(savedId || workflowId), JSON.stringify(draft)) } catch {}
   }, [workflowId, savedId, nodes, edges, name, workflowInput, autoPrompt, projectId, selectedKbDocIds, selectedDocId, workflowInputDocs, workflowRepoUrl, workflowRepoImport, kbMode, docCategory, repoUrl, orchestratorStream])
+
+  useEffect(() => {
+    if (!orchestratorLogRef.current) return
+    orchestratorLogRef.current.scrollTop = orchestratorLogRef.current.scrollHeight
+  }, [orchestratorStream.length, showOrchestratorPanel])
 
   const refresh = async () => {
     try {
@@ -537,19 +544,24 @@ export default function WorkflowBuilderPage() {
   }
 
   const run = async () => {
+    setRunningWorkflow(true)
     let id = savedId
-    if (!id) {
-      id = await save()
-      if (!id) return
-    }
-    const needsKbDocument = kbMode !== 'tools'
-    if (needsKbDocument && selectedKbDocIds.length === 0) return toast.error('Select one or more knowledge-base documents for this workflow')
-    const docId = needsKbDocument ? selectedKbDocIds[0] : ''
-    const uploadedWorkflowDocs = await uploadWorkflowFilesNow()
-    if (workflowFiles.length > 0 && uploadedWorkflowDocs.length === workflowInputDocs.length) return
-    const workflowRepoDoc = await ensureWorkflowRepoImport()
-    if (workflowRepoUrl.trim() && !workflowRepoDoc) return
+    let navigatingToRun = false
     try {
+      if (!id) {
+        id = await save()
+        if (!id) return
+      }
+      const needsKbDocument = kbMode !== 'tools'
+      if (needsKbDocument && selectedKbDocIds.length === 0) {
+        toast.error('Select one or more knowledge-base documents for this workflow')
+        return
+      }
+      const docId = needsKbDocument ? selectedKbDocIds[0] : ''
+      const uploadedWorkflowDocs = await uploadWorkflowFilesNow()
+      if (workflowFiles.length > 0 && uploadedWorkflowDocs.length === workflowInputDocs.length) return
+      const workflowRepoDoc = await ensureWorkflowRepoImport()
+      if (workflowRepoUrl.trim() && !workflowRepoDoc) return
       const res = await runWorkflow(id, {
         input_data: {
           document_id: docId,
@@ -568,9 +580,12 @@ export default function WorkflowBuilderPage() {
         },
       })
       toast.success('Workflow started')
+      navigatingToRun = true
       navigate(`/runs/${res.run_id}`)
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Run failed to start'))
+    } finally {
+      if (!navigatingToRun) setRunningWorkflow(false)
     }
   }
 
@@ -758,8 +773,8 @@ export default function WorkflowBuilderPage() {
             <button data-testid="save-workflow-btn" onClick={save} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-line bg-panel/80 text-sm hover:border-accent/40">
               <Save size={13} /> Save
             </button>
-            <button data-testid="run-workflow-btn" onClick={run} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90">
-              <Play size={13} /> Run workflow
+            <button data-testid="run-workflow-btn" onClick={run} disabled={runningWorkflow} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-60">
+              {runningWorkflow ? <LoaderCircle size={13} className="animate-spin" /> : <Play size={13} />} {runningWorkflow ? 'Starting...' : 'Run workflow'}
             </button>
           </div>
         </div>
@@ -776,7 +791,7 @@ export default function WorkflowBuilderPage() {
                 </div>
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted">{orchestratorStream.length}</span>
               </div>
-              <div className="max-h-[240px] overflow-y-auto px-4 py-3 font-mono">
+              <div ref={orchestratorLogRef} className="max-h-[240px] overflow-y-auto px-4 py-3 font-mono">
                 {orchestratorStream.length === 0 && <div className="text-[12px] text-white/40">Waiting for orchestration activity...</div>}
                 <div className="space-y-2.5">
                   {orchestratorStream.map((line, index) => (
@@ -788,45 +803,49 @@ export default function WorkflowBuilderPage() {
                   ))}
                 </div>
               </div>
-            </div>
-            {pendingPlannerInput && (autoPlan?.clarifying_questions || []).length > 0 && (
-              <div className="mt-3 max-h-[calc(100vh-430px)] overflow-y-auto rounded-2xl border border-cyan-300/20 bg-[#05070b]/70 p-4 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200">Orchestrator needs input</div>
-                <div className="mt-1 text-[12px] text-white/55">Answer these and send them back into the same streamed planning session.</div>
-                <div className="mt-3 space-y-3">
-                  {autoPlan.clarifying_questions.map((question, idx) => (
-                    <label key={`${question}-${idx}`} className="block">
-                      <span className="text-[12px] text-white/78">{question}</span>
-                      <input
-                        value={plannerQuestionAnswers[question] || ''}
-                        onChange={(event) => setPlannerQuestionAnswers((prev) => ({ ...prev, [question]: event.target.value }))}
-                        className="mt-1 w-full rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2 text-sm outline-none focus:border-cyan-300/40"
-                      />
-                    </label>
-                  ))}
-                </div>
-                <button onClick={replanPlanner} disabled={autoBuilding} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
-                  Send answers to orchestrator
-                </button>
-              </div>
-            )}
-            {!pendingPlannerInput && (autoPlan?.missing_templates || []).length > 0 && (
-              <div className="mt-3 max-h-[calc(100vh-430px)] overflow-y-auto rounded-2xl border border-cyan-300/20 bg-[#05070b]/80 p-4 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200">Marketplace approval</div>
-                <div className="mt-1 text-[12px] text-white/55">Exact-match seed agents are available. Install them here before the final architecture panel opens.</div>
-                <div className="mt-3 space-y-2">
-                  {autoPlan.missing_templates.map((item) => (
-                    <div key={item.template_id} className="rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2">
-                      <div className="text-sm text-ink">{item.name}</div>
-                      <div className="mt-1 text-[12px] text-muted">{item.description}</div>
+              {pendingPlannerInput && (autoPlan?.clarifying_questions || []).length > 0 && (
+                <details open className="border-t border-cyan-300/15 bg-cyan-300/[0.04]">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-cyan-200">Step input required</summary>
+                  <div className="max-h-[calc(100vh-430px)] overflow-y-auto px-4 pb-4">
+                    <div className="text-[12px] text-white/55">Answer these and send them back into the same planning run.</div>
+                    <div className="mt-3 space-y-3">
+                      {autoPlan.clarifying_questions.map((question, idx) => (
+                        <label key={`${question}-${idx}`} className="block">
+                          <span className="text-[12px] text-white/78">{question}</span>
+                          <input
+                            value={plannerQuestionAnswers[question] || ''}
+                            onChange={(event) => setPlannerQuestionAnswers((prev) => ({ ...prev, [question]: event.target.value }))}
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2 text-sm outline-none focus:border-cyan-300/40"
+                          />
+                        </label>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <button onClick={() => buildFromPrompt(true, plannerPromptDraft || autoPrompt || workflowInput)} disabled={installingMissing} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
-                  {installingMissing ? 'Installing and rebuilding...' : 'Install exact-match agents'}
-                </button>
-              </div>
-            )}
+                    <button onClick={replanPlanner} disabled={autoBuilding} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
+                      Send answers to orchestrator
+                    </button>
+                  </div>
+                </details>
+              )}
+              {!pendingPlannerInput && (autoPlan?.missing_templates || []).length > 0 && (
+                <details open className="border-t border-cyan-300/15 bg-cyan-300/[0.04]">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-cyan-200">Marketplace approval</summary>
+                  <div className="max-h-[calc(100vh-430px)] overflow-y-auto px-4 pb-4">
+                    <div className="text-[12px] text-white/55">Exact-match seed agents are available. Install them before the final architecture panel opens.</div>
+                    <div className="mt-3 space-y-2">
+                      {autoPlan.missing_templates.map((item) => (
+                        <div key={item.template_id} className="rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2">
+                          <div className="text-sm text-ink">{item.name}</div>
+                          <div className="mt-1 text-[12px] text-muted">{item.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => buildFromPrompt(true, plannerPromptDraft || autoPrompt || workflowInput)} disabled={installingMissing} className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50">
+                      {installingMissing ? 'Installing and rebuilding...' : 'Install exact-match agents'}
+                    </button>
+                  </div>
+                </details>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1062,6 +1081,20 @@ export default function WorkflowBuilderPage() {
             </div>
           )}
         </aside>
+      )}
+      {runningWorkflow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#030712]/55 backdrop-blur-sm">
+          <div className="w-[min(420px,calc(100vw-2rem))] rounded-3xl border border-cyan-300/20 bg-[#05070b]/90 p-6 text-center shadow-[0_28px_120px_rgba(0,0,0,0.45)]">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10">
+              <LoaderCircle size={20} className="animate-spin text-cyan-200" />
+            </div>
+            <div className="mt-4 font-display text-xl text-ink">Starting workflow run</div>
+            <div className="mt-2 text-sm leading-6 text-muted">Packaging inputs, validating agents, and opening the live execution console.</div>
+            <div className="mt-5 h-1 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full w-1/2 animate-[shimmer_1.1s_ease-in-out_infinite] rounded-full bg-cyan-300" />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
